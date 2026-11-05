@@ -1,0 +1,29 @@
+# =====================================================================
+# StudioForge 3D - Git Ignore (Protection Clé Privée Admin & Dépendances)
+# =====================================================================
+
+# SECRET ADMIN : NE JAMAIS ENVOYER SUR GITHUB !
+backend/data/.admin_private_key.json
+.admin_private_key.json
+Admin_Generer_Cle_Licence.bat
+
+# État de licence locale du poste client
+backend/data/license_state.json
+
+# Environnements Python & Node & Builds Exe
+backend/.venv/
+backend/__pycache__/
+backend/*/__pycache__/
+backend/build/
+backend/dist/
+backend/*.spec
+backend/test_*.png
+backend/test_*.py
+backend/bench_*.png
+backend/bench_*.py
+Release_Client_GitHub/
+frontend/node_modules/
+frontend/dist/
+*.pyc
+.DS_Store
+

@@ -1,0 +1,28 @@
+[
+  {
+    "id": "creality_hi",
+    "name": "Creality Hi (Combo 2× CFS)",
+    "brand": "Creality",
+    "bed_x_mm": 260.0,
+    "bed_y_mm": 260.0,
+    "bed_z_mm": 300.0,
+    "max_colors": 8,
+    "use_cosplay": true,
+    "use_hueforge": true,
+    "use_lithophane": true,
+    "notes": "Multi-couleurs automatique (2× CFS = jusqu'à 8 bobines). Idéale pour HueForge & Multi-Frame."
+  },
+  {
+    "id": "k1_max",
+    "name": "Creality K1 Max",
+    "brand": "Creality",
+    "bed_x_mm": 300.0,
+    "bed_y_mm": 300.0,
+    "bed_z_mm": 300.0,
+    "max_colors": 1,
+    "use_cosplay": true,
+    "use_hueforge": false,
+    "use_lithophane": true,
+    "notes": "CoreXY grand volume 300×300×300 mm (Mono-couleur, désactivée par défaut dans HueForge)."
+  }
+]
