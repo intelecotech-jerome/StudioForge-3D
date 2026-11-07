@@ -14,6 +14,7 @@ function StlMeshObject({
   wireframe,
   opacity,
   colorLayers,
+  popoutConfig = null,
   lithoBacklightConfig = null,
   scaleZ = 1.0,
   centerObjectAtOrigin = false,
@@ -113,8 +114,27 @@ function StlMeshObject({
       });
 
       const baseStop = stops[0];
+      const maxPlateZ = stops[stops.length - 1].endZ;
+      const popMode = popoutConfig?.mode || 'none';
+      const popColor = popoutConfig?.hexColor ? new THREE.Color(popoutConfig.hexColor) : new THREE.Color('#94a3b8');
+
       for (let i = 0; i < count; i++) {
-        const z = pos.getZ(i);
+        const rawZ = pos.getZ(i);
+        if (popMode === 'stl_popout' && rawZ > maxPlateZ + 0.08) {
+          colors[i * 3] = popColor.r;
+          colors[i * 3 + 1] = popColor.g;
+          colors[i * 3 + 2] = popColor.b;
+          continue;
+        }
+
+        let z = rawZ;
+        if (popMode === 'image_puff_3d' && rawZ > maxPlateZ + 0.04) {
+          const scaled = rawZ * 20.0;
+          const frac = scaled - Math.floor(scaled);
+          const normHf = Math.min(1.0, Math.max(0.0, (frac - 0.05) / 0.90));
+          z = baseStop.endZ + normHf * Math.max(0.08, maxPlateZ - baseStop.endZ);
+        }
+
         let r = baseStop.r;
         let g = baseStop.g;
         let b = baseStop.b;
@@ -207,9 +227,10 @@ function StlMeshObject({
       let rMinCyl = 25.0;
       let sphereCenterZ = (zMin + zMax) * 0.5;
       let sphereInnerR = 45.0;
+      let sphereOuterMaxR = 70.0;
       let standCutoffZ = zMin + 12.0;
 
-      if (shapeMode === 'cylinder_lamp') {
+      if (['cylinder_lamp', 'polygon_lantern', 'cone_lampshade', 'vase_lumina'].includes(shapeMode)) {
         let minR = 1e9;
         const midZ = (zMin + zMax) * 0.55;
         for (let i = 0; i < count; i++) {
@@ -221,19 +242,36 @@ function StlMeshObject({
         }
         if (minR < 1e8) rMinCyl = minR;
       } else if (shapeMode === 'sphere_globe') {
-        // Estimate sphere center Z from upper hemisphere bounding box
-        const approxRadius = Math.max(20.0, xMax - tMax * 0.5);
-        sphereCenterZ = zMax - approxRadius - tMax * 0.5;
-        standCutoffZ = Math.max(zMin + 8.0, sphereCenterZ - approxRadius * 0.78);
-        let minR = 1e9;
+        const cfgDiameter = Number(lithoBacklightConfig.sphereDiameterMm || 140.0);
+        const exactRIn = Math.max(20.0, cfgDiameter * 0.5 - tMax);
+
+        // In build_sphere_globe_lithophane_mesh, the North Pole inner vertex is at (x=0, y=0, z = sphere_center_z + r_in)
+        // and the North Pole outer vertex is at (x=0, y=0, z = sphere_center_z + r_in + t_pole).
+        // Scanning vertices at (x=0, y=0) near zMax gives us z_north_in with 0.000mm error regardless of the stand!
+        let zNorthIn = 1e9;
+        let foundNorthPole = false;
         for (let i = 0; i < count; i++) {
           const z = pos.getZ(i);
-          if (z > sphereCenterZ - approxRadius * 0.3 && z < sphereCenterZ + approxRadius * 0.6) {
-            const r = Math.hypot(pos.getX(i), pos.getY(i), z - sphereCenterZ);
-            if (r > approxRadius * 0.6 && r < minR) minR = r;
+          if (z > zMax - tMax - 4.0) {
+            const rxy = Math.hypot(pos.getX(i), pos.getY(i));
+            if (rxy < 0.08) {
+              if (z < zNorthIn) zNorthIn = z;
+              foundNorthPole = true;
+            }
           }
         }
-        if (minR < 1e8) sphereInnerR = minR;
+
+        if (foundNorthPole && zNorthIn < 1e8) {
+          sphereInnerR = exactRIn;
+          sphereCenterZ = zNorthIn - sphereInnerR;
+          sphereOuterMaxR = sphereInnerR + tMax + 0.35;
+        } else {
+          // Fallback for imported external STL globes
+          sphereInnerR = exactRIn;
+          sphereCenterZ = zMax - cfgDiameter * 0.5;
+          sphereOuterMaxR = sphereInnerR + tMax + 0.5;
+        }
+        standCutoffZ = Math.max(zMin + 8.0, sphereCenterZ - sphereInnerR * 0.82);
       }
 
       for (let i = 0; i < count; i++) {
@@ -244,21 +282,30 @@ function StlMeshObject({
         let localT = tMax;
         let isStructuralFrame = false;
 
-        if (shapeMode === 'flat_plate') {
+        if (shapeMode === 'flat_plate' || shapeMode === 'stencil_cutout') {
           localT = standVertical ? Math.abs(y - yMin) : z - zMin;
           if (localT < 0.05) localT = tMax * 0.85;
-        } else if (shapeMode === 'cylinder_lamp') {
+          if (standVertical && z < zMin + 3.4 && Math.abs(y) > tMax * 1.3) {
+            isStructuralFrame = true;
+          }
+        } else if (['cylinder_lamp', 'polygon_lantern', 'cone_lampshade', 'vase_lumina'].includes(shapeMode)) {
           if (z < zMin + 10.5 && Math.hypot(x, y) < rMinCyl - 1.5) {
             isStructuralFrame = true;
           } else {
             const r = Math.hypot(x, y);
-            localT = Math.max(tMin, r - rMinCyl);
+            localT = Math.max(tMin, Math.min(tMax, r - rMinCyl));
           }
         } else if (shapeMode === 'sphere_globe') {
-          if (z < standCutoffZ) {
+          const cfgDiameter = Number(lithoBacklightConfig.sphereDiameterMm || 140.0);
+          const isStandOnly = (zMax - zMin) < cfgDiameter * 0.78;
+          const r = Math.hypot(x, y, z - sphereCenterZ);
+          // Any vertex below standCutoffZ OR in the lower half whose radius lies outside the sphere's shell
+          // (such as the Rocky Lunar base or Wavy stand arms!) is shaded as structural stand.
+          const isOutsideSphereShell =
+            z < sphereCenterZ + 5.0 && (r < sphereInnerR - 0.35 || r > sphereOuterMaxR + 0.35);
+          if (isStandOnly || z < standCutoffZ || isOutsideSphereShell) {
             isStructuralFrame = true;
           } else {
-            const r = Math.hypot(x, y, z - sphereCenterZ);
             localT = Math.max(tMin, r - sphereInnerR);
           }
         } else if (shapeMode === 'framed_lightbox') {
@@ -309,7 +356,7 @@ function StlMeshObject({
     }
 
     return geom;
-  }, [rawGeometry, colorLayers, lithoBacklightConfig]);
+  }, [rawGeometry, colorLayers, popoutConfig, lithoBacklightConfig]);
 
   if (!geometry) return null;
 
@@ -522,12 +569,20 @@ function CosplayRodPreview({
 /**
  * Visualizes Horizontal Auto-Grid Cut Planes (Mode A) or Localized Bounded Figurine Cut (Mode B)
  */
-function CutPlanesPreview({ cutMode, cutPlanesZ, bedSize, boundedOrigin, boundedSize, boundedType }) {
-  const [bx, by] = bedSize;
+function CutPlanesPreview({
+  cutMode = 'auto_grid',
+  cutPlanesZ = [],
+  bedSize = [300, 300, 300],
+  boundedOrigin = [0, 0, 0],
+  boundedSize = [80, 80, 80],
+  boundedType = 'cylinder',
+}) {
+  const [bx, by] = bedSize || [300, 300, 300];
+  const safePlanes = Array.isArray(cutPlanesZ) ? cutPlanesZ : [];
 
   if (cutMode === 'bounded_figurine') {
-    const [ox, oy, oz] = boundedOrigin;
-    const [sx, sy, sz] = boundedSize;
+    const [ox, oy, oz] = boundedOrigin || [0, 0, 0];
+    const [sx, sy, sz] = boundedSize || [80, 80, 80];
     return (
       <group position={[ox, oy, oz]}>
         {boundedType === 'cylinder' ? (
@@ -556,7 +611,7 @@ function CutPlanesPreview({ cutMode, cutPlanesZ, bedSize, boundedOrigin, bounded
 
   return (
     <group>
-      {cutPlanesZ.map((zVal, idx) => (
+      {safePlanes.map((zVal, idx) => (
         <group key={idx} position={[0, 0, zVal]}>
           <mesh>
             <planeGeometry args={[bx * 0.9, by * 0.9]} />
@@ -581,19 +636,20 @@ function CutPlanesPreview({ cutMode, cutPlanesZ, bedSize, boundedOrigin, bounded
 export default function Viewer3D({
   stlUrl,
   modelStats,
-  bedSize,
-  showRod,
-  pointA,
-  pointB,
-  onChangePointA,
-  onChangePointB,
-  rodConfig,
-  cutMode,
-  cutPlanesZ,
-  boundedOrigin,
-  boundedSize,
-  boundedType,
+  bedSize = [300, 300, 300],
+  showRod = false,
+  pointA = null,
+  pointB = null,
+  onChangePointA = () => {},
+  onChangePointB = () => {},
+  rodConfig = {},
+  cutMode = 'auto_grid',
+  cutPlanesZ = [],
+  boundedOrigin = [0, 0, 0],
+  boundedSize = [80, 80, 80],
+  boundedType = 'cylinder',
   colorLayers = null,
+  popoutConfig = null,
   lithoBacklightConfig = null,
   scaleZ = 1.0,
 }) {
@@ -705,11 +761,11 @@ export default function Viewer3D({
       </div>
 
       {/* Model Dimensions HUD Overlay */}
-      {modelStats && (
+      {modelStats && modelStats.extents && (
         <div className="viewer-stats-overlay">
           <div>
             <strong>DIMENSIONS (X×Y×Z) :</strong> {modelStats.extents[0]} × {modelStats.extents[1]} ×{' '}
-            <span className={modelStats.extents[2] > bedSize[2] ? 'text-warn' : 'text-cyan'}>
+            <span className={modelStats.extents[2] > (bedSize?.[2] || 300) ? 'text-warn' : 'text-cyan'}>
               {modelStats.extents[2]} mm
             </span>
           </div>
@@ -720,7 +776,7 @@ export default function Viewer3D({
             ) : (
               <span className="text-warn">Non-Manifold (Réparé: {modelStats.repair_method})</span>
             )}{' '}
-            | {modelStats.faces_count.toLocaleString()} triangles
+            | {(modelStats.faces_count ?? modelStats.faces ?? 0).toLocaleString()} triangles
           </div>
         </div>
       )}
@@ -784,6 +840,7 @@ export default function Viewer3D({
           wireframe={wireframe}
           opacity={xrayOpacity}
           colorLayers={colorLayers}
+          popoutConfig={popoutConfig}
           lithoBacklightConfig={lithoBacklightConfig}
           scaleZ={scaleZ}
           centerObjectAtOrigin={lockObjectCenter && !showRod}

@@ -26,21 +26,27 @@ call .venv\Scripts\pyinstaller.exe --noconfirm --clean ^
     --name "StudioForge3D" ^
     --icon "%~dp0frontend\public\studioforge-icon.ico" ^
     --add-data "%~dp0frontend\dist;frontend_dist" ^
+    --add-data "%~dp0backend\data\planet_maps;data\planet_maps" ^
+    --add-data "%~dp0backend\data\planet_stands;data\planet_stands" ^
     --collect-all trimesh ^
     --collect-all shapely ^
     --collect-all scipy ^
     studioforge_desktop.py
 
+if not exist "%~dp0backend\dist\StudioForge3D\data" mkdir "%~dp0backend\dist\StudioForge3D\data"
+xcopy /E /I /Y "%~dp0backend\data\planet_maps" "%~dp0backend\dist\StudioForge3D\data\planet_maps" >nul
+xcopy /E /I /Y "%~dp0backend\data\planet_stands" "%~dp0backend\dist\StudioForge3D\data\planet_stands" >nul
+
 echo.
 echo [4/4] Creation de l'archive prete a publier sur GitHub Releases...
 if not exist "%~dp0Release_Client_GitHub" mkdir "%~dp0Release_Client_GitHub"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%~dp0backend\dist\StudioForge3D\*' -DestinationPath '%~dp0Release_Client_GitHub\StudioForge3D_Windows_x64_v1.2.0.zip' -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%~dp0backend\dist\StudioForge3D\*' -DestinationPath '%~dp0Release_Client_GitHub\StudioForge3D_Windows_x64_v1.3.0.zip' -Force"
 
 echo.
 echo ============================================================================
 echo  TERMINE AVEC SUCCES !
 echo  1) Dossier executable autonome : backend\dist\StudioForge3D\StudioForge3D.exe
-echo  2) Archive ZIP pour GitHub Releases : Release_Client_GitHub\StudioForge3D_Windows_x64_v1.2.0.zip
+echo  2) Archive ZIP pour GitHub Releases : Release_Client_GitHub\StudioForge3D_Windows_x64_v1.3.0.zip
 echo  Votre fille ou vos clients n'ont qu'a lancer StudioForge3D.exe (0 installation !)
 echo ============================================================================
 pause

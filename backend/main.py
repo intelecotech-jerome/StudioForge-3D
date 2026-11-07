@@ -37,14 +37,14 @@ from core.smart_cutter import (
     slice_bounded_figurine,
     package_parts_to_zip_bytes,
 )
-from modules_futurs import hueforge_tiler, lithophane_gen, puzzles_hash
+from modules_futurs import hueforge_tiler, lithophane_gen, puzzles_hash, wirepress_gen, makerlab_gen
 from core import spool_library, license_manager
 
 
 app = FastAPI(
     title="StudioForge 3D - Geometric Engine API",
-    description="Moteur géométrique 3D local (trimesh + manifold3d + pymeshfix) pour HueForge Studio, Lumina 3D & SmartCut 3D.",
-    version="1.2.0",
+    description="Moteur géométrique 3D local (trimesh + manifold3d + pymeshfix) pour HueForge Studio, Lumina 3D, WirePress 3D, MakerLab 3D & SmartCut 3D.",
+    version="1.3.0",
 )
 
 app.add_middleware(
@@ -62,6 +62,8 @@ app.include_router(spool_library.printers_router)
 app.include_router(hueforge_tiler.router)
 app.include_router(lithophane_gen.router)
 app.include_router(puzzles_hash.router)
+app.include_router(wirepress_gen.router)
+app.include_router(makerlab_gen.router)
 
 
 @dataclass

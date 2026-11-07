@@ -3,6 +3,8 @@ import Sidebar from './components/Sidebar';
 import Viewer3D from './components/Viewer3D';
 import HueForgeStudio from './components/HueForgeStudio';
 import LithophaneStudio from './components/LithophaneStudio';
+import WirePressStudio from './components/WirePressStudio';
+import MakerLabStudio from './components/MakerLabStudio';
 import SpoolManager from './components/SpoolManager';
 
 // Direct connection to local FastAPI engine (CORS enabled) to avoid Vite proxy timeouts on 2M+ triangle meshes
@@ -19,10 +21,10 @@ export default function App() {
   const [spoolsRefreshTick, setSpoolsRefreshTick] = useState(0);
   const [printers, setPrinters] = useState([]);
   const [licenseStatus, setLicenseStatus] = useState({
-    unlocked_modules: ['hueforge', 'lithophane', 'smartcut', 'puzzles'],
+    unlocked_modules: ['hueforge', 'lithophane', 'wirepress'],
     is_admin_machine: false,
     customer_name: 'Chargement...',
-    app_version: '1.2.0',
+    app_version: '1.3.0',
   });
   const [quickKeyInput, setQuickKeyInput] = useState('');
   const [quickKeyMsg, setQuickKeyMsg] = useState(null);
@@ -59,6 +61,8 @@ export default function App() {
     if (modId === 'module_2a_hueforge') return unlocked.includes('hueforge');
     if (modId === 'module_2b_lithophane') return unlocked.includes('lithophane');
     if (modId === 'module_1_cosplay') return unlocked.includes('smartcut');
+    if (modId === 'module_wirepress') return unlocked.includes('wirepress');
+    if (modId === 'module_makerlab') return unlocked.includes('makerlab');
     if (modId === 'module_puzzles') return unlocked.includes('puzzles');
     return true;
   };
@@ -75,10 +79,17 @@ export default function App() {
               ? '🎨 HueForge Studio'
               : targetMod === 'module_2b_lithophane'
               ? '💡 Lumina 3D'
+              : targetMod === 'module_wirepress'
+              ? '👕 WirePress 3D'
+              : targetMod === 'module_makerlab'
+              ? '🛠️ MakerLab 3D'
               : '🧩 Puzzle & Cryptex 3D',
           packLabel:
-            targetMod === 'module_1_cosplay' || targetMod === 'module_puzzles'
-              ? 'Extension +5 €'
+            targetMod === 'module_1_cosplay' ||
+            targetMod === 'module_puzzles' ||
+            targetMod === 'module_wirepress' ||
+            targetMod === 'module_makerlab'
+              ? 'Extension +5 € (ou En Test / Bêta)'
               : 'Pack de Base 20 €',
         }
       );
@@ -409,6 +420,18 @@ export default function App() {
             ✂️ SMARTCUT 3D {!isModuleUnlocked('module_1_cosplay') && '🔒'}
           </button>
           <button
+            className={`top-tab-btn ${activeModule === 'module_wirepress' ? 'active' : ''}`}
+            onClick={() => handleOpenModule('module_wirepress')}
+          >
+            👕 WIREPRESS 3D {!isModuleUnlocked('module_wirepress') && '🔒'}
+          </button>
+          <button
+            className={`top-tab-btn ${activeModule === 'module_makerlab' ? 'active' : ''}`}
+            onClick={() => handleOpenModule('module_makerlab')}
+          >
+            🛠️ MAKERLAB 3D {!isModuleUnlocked('module_makerlab') && '🔒'}
+          </button>
+          <button
             className={`top-tab-btn ${activeModule === 'setup_spools' ? 'active' : ''}`}
             onClick={() => {
               setInitialSetupTab('spools');
@@ -603,15 +626,24 @@ export default function App() {
                   features: ['Découpe Auto-Grille & Locale', 'Tunnels de renfort métalliques', 'Tenons & Mortaises paramétriques'],
                 },
                 {
-                  target: 'module_puzzles',
-                  icon: '🧩',
-                  name: 'Puzzle & Cryptex 3D',
-                  badge: 'Extension (+5 €) • Bientôt',
-                  unlocked: isModuleUnlocked('module_puzzles'),
-                  comingSoon: true,
+                  target: 'module_wirepress',
+                  icon: '👕',
+                  name: 'WirePress 3D',
+                  badge: 'Extension (+5 €)',
+                  unlocked: isModuleUnlocked('module_wirepress'),
+                  accent: '#10b981',
+                  desc: 'Transformez n’importe quelle photo, portrait d’animal ou logo en une structure filaire 3D ("Wire Structure") monobloc à presser à chaud (fer à repasser ou presse textile) sur un T-shirt, Pull ou Hoodie.',
+                  features: ['Cabine d’Essayage T-Shirt & Pull', 'Choix Couleur Textile & Bobine CFS', 'Ponts Automatiques 100% solidaires'],
+                },
+                {
+                  target: 'module_makerlab',
+                  icon: '🛠️',
+                  name: 'MakerLab 3D',
+                  badge: 'Extension (+5 € / Bêta)',
+                  unlocked: isModuleUnlocked('module_makerlab'),
                   accent: '#a855f7',
-                  desc: 'Générateur de boîtes à secret mécaniques, Cryptex à code personnalisable, labyrinthes 3D et puzzles géométriques emboîtables prêts à imprimer sans support.',
-                  features: ['Cryptex à anneaux codés', 'Puzzles 3D à partir de vos images', 'Mécanismes sans support'],
+                  desc: 'Boîte à outils créatifs 3D : Emporte-Pièces & Tampons, Boîtes & Couvercles en relief, Jouets Articulés Flexi Print-in-Place, Bas-Relief depuis .STL, IA Photo/Texte ➔ 3D (Style Meshy), Lenticulaire et Morphing 90°.',
+                  features: ['🍪 Emporte-Pièce + 📦 Boîte + 🐟 Flexi', '🗿 .STL ➔ Bas-Relief + 🤖 IA 3D (Meshy)', '🪞 Lenticulaire & 🔄 Morphing 90°'],
                 },
                 {
                   target: 'setup_spools',
@@ -849,6 +881,27 @@ export default function App() {
             setInitialSetupTab('spools');
             setActiveModule('setup_spools');
           }}
+        />
+      </div>
+
+      <div style={{ display: activeModule === 'module_wirepress' ? 'block' : 'none' }}>
+        <WirePressStudio
+          printerPreset={printerPreset}
+          onChangePrinterPreset={handlePrinterChange}
+          printers={printers}
+          spoolsRefreshTick={spoolsRefreshTick}
+          onOpenSpoolSetup={() => {
+            setInitialSetupTab('spools');
+            setActiveModule('setup_spools');
+          }}
+        />
+      </div>
+
+      <div style={{ display: activeModule === 'module_makerlab' ? 'block' : 'none' }}>
+        <MakerLabStudio
+          bedSize={bedSize}
+          isVisible={activeModule === 'module_makerlab'}
+          onOpenHueForge={() => setActiveModule('module_2a_hueforge')}
         />
       </div>
 

@@ -44,6 +44,7 @@ from modules_futurs.hueforge_tiler import (
     find_shared_edges_midpoints,
 )
 from modules_futurs.lithophane_globes import (
+    OFFICIAL_PLANET_CATALOG,
     load_lamp_standards,
     save_custom_lamp_standard,
     delete_custom_lamp_standard,
@@ -53,6 +54,13 @@ from modules_futurs.lithophane_globes import (
     build_globe_lamp_stand_mesh,
     build_suspended_lamp_holder_bars,
     _build_annular_ring_with_cable_notch,
+    build_accordion_dual_lithophane_mesh,
+    build_polygon_lantern_lithophane_mesh,
+    build_cone_lampshade_lithophane_mesh,
+    build_vase_lumina_lithophane_mesh,
+    build_balloon_heart_lithophane_mesh,
+    extract_stencil_silhouette_mask,
+    build_stencil_cutout_lithophane_mesh,
 )
 
 router = APIRouter(prefix="/api/lithophane", tags=["Module 2B - Lithophanies & Lightbox LED"])
@@ -61,9 +69,15 @@ router = APIRouter(prefix="/api/lithophane", tags=["Module 2B - Lithophanies & L
 ShapeMode = Literal[
     "flat_plate",
     "curved_arc",
+    "accordion_dual",
     "half_cylinder",
     "cylinder_lamp",
+    "polygon_lantern",
+    "cone_lampshade",
+    "vase_lumina",
     "sphere_globe",
+    "balloon_heart",
+    "stencil_cutout",
     "framed_lightbox",
     "cube_lightbox",
 ]
@@ -84,22 +98,8 @@ LedTintMode = Literal[
     "plastic_off",
 ]
 
-GlobeSourceMode = Literal[
-    "custom_photo",
-    "planet_moon",
-    "planet_earth",
-    "planet_mars",
-    "planet_jupiter",
-    "planet_saturn",
-    "external_stl",
-]
-
-GlobeStandStyle = Literal[
-    "ring_bambu",
-    "tripod_modern",
-    "pedestal_fluted",
-    "crown_gothic",
-]
+GlobeSourceMode = str
+GlobeStandStyle = str
 
 
 @dataclass
@@ -186,8 +186,12 @@ class LithoPreviewRequest(BaseModel):
 
     # Sphere / Globe Lithophane Parameters
     globe_source_mode: GlobeSourceMode = "custom_photo"
-    globe_stand_style: GlobeStandStyle = "ring_bambu"
+    globe_stand_style: GlobeStandStyle = "stand_bambu_official"
     sphere_diameter_mm: float = Field(default=140.0, ge=60.0, le=250.0)
+
+    # New Architecture Parameters (Accordion Dual, Polygon Lantern)
+    accordion_panels: int = Field(default=3, ge=2, le=4)
+    polygon_sides: int = Field(default=6, ge=5, le=8)
 
     add_hanging_ring: bool = False
     add_stand_feet: bool = False
@@ -235,7 +239,7 @@ def _hex_to_rgb_norm(hex_str: str) -> Tuple[float, float, float]:
 def _build_stitched_panorama(state: LithophaneSessionState) -> Image.Image:
     """
     If extra images (slots 1, 2, 3) are uploaded, stitches all active images horizontally
-    with the same height to wrap around a Cylinder or Sphere/Globe!
+    with the same height to wrap around a Cylinder, Polygon Lantern, Cone, Vase, Accordion, or Sphere/Globe!
     """
     imgs = [state.original_image]
     for slot in sorted(state.extra_images.keys()):
@@ -260,17 +264,18 @@ def _build_stitched_panorama(state: LithophaneSessionState) -> Image.Image:
 
 
 def _get_source_image_for_request(state: LithophaneSessionState, req: LithoPreviewRequest) -> Image.Image:
-    """Selects either planetary map, stitched multi-image panorama, or single image."""
-    if req.shape_mode == "sphere_globe" and req.globe_source_mode in (
-        "planet_moon",
-        "planet_earth",
-        "planet_mars",
-        "planet_jupiter",
-        "planet_saturn",
-    ):
-        return generate_planetary_luminance_map(req.globe_source_mode, width=720, height=360)
+    """Selects either authentic planetary relief map, stitched multi-image panorama, or single image."""
+    if req.shape_mode == "sphere_globe" and req.globe_source_mode.startswith("planet_"):
+        return generate_planetary_luminance_map(req.globe_source_mode, width=1080, height=540)
 
-    if req.shape_mode in ("cylinder_lamp", "sphere_globe") and len(state.extra_images) > 0:
+    if req.shape_mode in (
+        "cylinder_lamp",
+        "polygon_lantern",
+        "cone_lampshade",
+        "vase_lumina",
+        "accordion_dual",
+        "sphere_globe",
+    ) and len(state.extra_images) > 0:
         return _build_stitched_panorama(state)
 
     return state.original_image
@@ -282,23 +287,23 @@ def _resolve_dimensions_mm(state: LithophaneSessionState, req: LithoPreviewReque
     eff_aspect = float(src_img.width) / max(1.0, float(src_img.height))
 
     w = float(req.width_mm)
-    if req.shape_mode == "cube_lightbox":
+    if req.shape_mode in ("cube_lightbox", "balloon_heart"):
         return (w, w)
 
     if req.shape_mode == "sphere_globe":
         d = float(req.sphere_diameter_mm)
         return (round(math.pi * d, 1), round(d, 1))
 
-    if req.shape_mode == "cylinder_lamp":
+    if req.shape_mode in ("cylinder_lamp", "polygon_lantern", "cone_lampshade", "vase_lumina"):
         d = float(req.cylinder_diameter_mm)
         circumf = math.pi * d
         if req.auto_adapt_cylinder:
-            # Automatically adapt cylinder height to match exact image/panorama aspect ratio around 360°!
+            # Automatically adapt height to match exact image/panorama aspect ratio around 360°!
             h_auto = circumf / max(0.25, eff_aspect)
-            h_clamped = max(45.0, min(255.0, h_auto))
+            h_clamped = max(55.0, min(255.0, h_auto))
             return (round(circumf, 1), round(h_clamped, 1))
         h = float(req.height_mm) if req.height_mm > 10.0 else (w / max(0.15, eff_aspect))
-        h = max(35.0, min(285.0, h))
+        h = max(45.0, min(285.0, h))
         return (round(circumf, 1), round(h, 1))
 
     h = float(req.height_mm) if req.height_mm > 10.0 else (w / max(0.15, eff_aspect))
@@ -1164,8 +1169,8 @@ async def remove_lamp_standard(std_id: str):
 
 @router.post("/init-planet-session")
 async def init_planet_lithophane_session(planet_mode: str = Query(default="planet_moon")):
-    """Initializes a Lithophane Globe session directly from a built-in Planetary/Lunar map without needing an image upload."""
-    pil_img = generate_planetary_luminance_map(planet_mode, width=720, height=360)
+    """Initializes a Lithophane Globe session directly from an authentic Planetary/Lunar STL relief map without needing an image upload."""
+    pil_img = generate_planetary_luminance_map(planet_mode, width=1080, height=540)
     w, h = pil_img.size
     aspect = round(float(w) / float(h), 4)
     session_id = str(uuid.uuid4())
@@ -1174,16 +1179,11 @@ async def init_planet_lithophane_session(planet_mode: str = Query(default="plane
     pil_img.save(buf, format="PNG")
     src_b64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
-    planet_names = {
-        "planet_moon": "Lune_Cratères_HD.png",
-        "planet_earth": "Terre_Continents_HD.png",
-        "planet_mars": "Mars_Olympus_Mons.png",
-        "planet_jupiter": "Jupiter_Grande_Tache.png",
-        "planet_saturn": "Planete_SciFi_Anneaux.png",
-    }
+    planet_label_map = {p["id"]: p["label"] for p in OFFICIAL_PLANET_CATALOG}
+    p_label = planet_label_map.get(planet_mode, planet_mode)
     state = LithophaneSessionState(
         session_id=session_id,
-        filename=planet_names.get(planet_mode, "Globe_Planete.png"),
+        filename=f"{planet_mode}_HD.png",
         original_image=pil_img,
         aspect_ratio=aspect,
     )
@@ -1191,8 +1191,8 @@ async def init_planet_lithophane_session(planet_mode: str = Query(default="plane
 
     t_grid, _ = compute_lithophane_thickness_grid(
         pil_img,
-        nx=440,
-        ny=220,
+        nx=480,
+        ny=240,
         min_thickness_mm=0.8,
         max_thickness_mm=3.0,
         contrast=1.15,
@@ -1207,7 +1207,7 @@ async def init_planet_lithophane_session(planet_mode: str = Query(default="plane
 
     return {
         "session_id": session_id,
-        "filename": state.filename,
+        "filename": p_label,
         "image_size": [w, h],
         "aspect_ratio": aspect,
         "effective_width_mm": round(math.pi * 140.0, 1),
@@ -1394,12 +1394,25 @@ async def preview_lithophane_2d(session_id: str, req: LithoPreviewRequest):
             width_px=pw,
             height_px=ph,
         )
+    elif req.shape_mode == "balloon_heart":
+        tiles = build_layout_polygons("single_heart", size_mm=req.width_mm, aspect_ratio=1.0)
+        pw = 400
+        ph = 400
+        inside_mask, rim_mask = _rasterize_layout_masks(
+            tiles,
+            border_style="raised_top",
+            border_width_mm=3.0,
+            width_px=pw,
+            height_px=ph,
+        )
     else:
         pw = 440
         ph = max(140, int(round(pw * (eff_h / max(1.0, eff_w)))))
         if ph > 480:
             ph = 480
             pw = max(140, int(round(ph * (eff_w / max(1.0, eff_h)))))
+        if req.shape_mode == "stencil_cutout":
+            inside_mask, rim_mask = extract_stencil_silhouette_mask(src_img, width_px=pw, height_px=ph)
 
     # For Cube 4-Faces with multiple images, show a 2x2 collage of the 4 faces in the 2D preview!
     if req.shape_mode == "cube_lightbox" and len(state.extra_images) > 0:
@@ -1616,6 +1629,227 @@ async def generate_lithophane_3d_stl(session_id: str, req: LithoPreviewRequest):
             )
             assembly_preview_mesh = mesh
 
+        elif req.shape_mode == "accordion_dual":
+            nx, ny = _calc_grid_res(eff_w, eff_h)
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_accordion_dual_lithophane_mesh(
+                t_grid=t_grid,
+                total_width_mm=eff_w,
+                height_mm=eff_h,
+                num_panels=req.accordion_panels,
+                fold_angle_deg=34.0,
+                border_width_mm=req.border_width_mm,
+                frame_thickness_mm=frame_t,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename=f"01_Lithophane_Accordion_{req.accordion_panels}Panels.stl",
+                    label=f"Paravent Lithophanie Zig-Zag ({req.accordion_panels} Volets Autoportants)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
+        elif req.shape_mode == "polygon_lantern":
+            nx = max(320, int(req.grid_resolution * 1.25))
+            ny = max(120, int(round(nx * (eff_h / max(1.0, eff_w)))))
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_polygon_lantern_lithophane_mesh(
+                t_grid=t_grid,
+                diameter_mm=req.cylinder_diameter_mm,
+                height_mm=eff_h,
+                num_sides=req.polygon_sides,
+                border_width_mm=req.border_width_mm,
+                frame_thickness_mm=frame_t,
+                lamp_spec=lamp_spec,
+                add_hanging_loops=True,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename=f"01_Lithophane_Polygon_Lantern_{req.polygon_sides}Faces.stl",
+                    label=f"Lanterne Polygone ({req.polygon_sides} Faces + Anneaux Suspension + Support Lampe)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
+        elif req.shape_mode == "cone_lampshade":
+            nx = max(320, int(req.grid_resolution * 1.25))
+            ny = max(120, int(round(nx * (eff_h / max(1.0, eff_w)))))
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_cone_lampshade_lithophane_mesh(
+                t_grid=t_grid,
+                bottom_diameter_mm=req.cylinder_diameter_mm,
+                height_mm=eff_h,
+                top_ratio=0.52,
+                border_width_mm=req.border_width_mm,
+                frame_thickness_mm=frame_t,
+                lamp_spec=lamp_spec,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename="01_Lithophane_Cone_Lampshade_360.stl",
+                    label=f"Abat-Jour Conique 360° (Ø{int(req.cylinder_diameter_mm)}×{int(eff_h)}mm + Support Lampe)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
+        elif req.shape_mode == "vase_lumina":
+            nx = max(320, int(req.grid_resolution * 1.25))
+            ny = max(140, int(round(nx * (eff_h / max(1.0, eff_w)))))
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_vase_lumina_lithophane_mesh(
+                t_grid=t_grid,
+                diameter_mm=req.cylinder_diameter_mm,
+                height_mm=eff_h,
+                border_width_mm=req.border_width_mm,
+                frame_thickness_mm=frame_t,
+                lamp_spec=lamp_spec,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename="01_Lithophane_Vase_Amphora_360.stl",
+                    label=f"Vase Lumineux 360° (Ø{int(req.cylinder_diameter_mm)}×{int(eff_h)}mm + Support Lampe)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
+        elif req.shape_mode == "balloon_heart":
+            nx = int(req.grid_resolution)
+            ny = nx
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_balloon_heart_lithophane_mesh(
+                t_grid=t_grid,
+                width_mm=eff_w,
+                frame_thickness_mm=frame_t,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename="01_Lithophane_Balloon_Heart_3D.stl",
+                    label=f"Cœur Bombé 3D (Balloon {int(eff_w)}mm + Socle Intégré)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
+        elif req.shape_mode == "stencil_cutout":
+            nx, ny = _calc_grid_res(eff_w, eff_h)
+            t_grid, _ = compute_lithophane_thickness_grid(
+                src_img,
+                nx=nx,
+                ny=ny,
+                min_thickness_mm=req.min_thickness_mm,
+                max_thickness_mm=req.max_thickness_mm,
+                negative_invert=req.negative_invert,
+                flip_horizontal=req.flip_horizontal,
+                contrast=req.contrast,
+                gamma=req.gamma,
+                detail_boost=req.detail_boost,
+                smoothing_sigma=req.smoothing_sigma,
+            )
+            mesh = build_stencil_cutout_lithophane_mesh(
+                img=src_img,
+                t_grid=t_grid,
+                width_mm=eff_w,
+                height_mm=eff_h,
+                frame_thickness_mm=frame_t,
+                stand_vertical_for_print=req.stand_vertical_for_print,
+            )
+            ext = tuple(round(float(v), 2) for v in mesh.extents)
+            parts.append(
+                LithophanePart(
+                    part_index=1,
+                    filename="01_Lithophane_Stencil_Silhouette.stl",
+                    label=f"Silhouette Détourée (Stencil {int(eff_w)}×{int(eff_h)}mm + Socle)",
+                    extents_mm=ext,
+                    faces_count=int(len(mesh.faces)),
+                    stl_bytes=export_mesh_stl_bytes(mesh),
+                )
+            )
+            assembly_preview_mesh = mesh
+
         elif req.shape_mode == "cylinder_lamp":
             nx = max(320, int(req.grid_resolution * 1.25))
             ny = max(120, int(round(nx * (eff_h / max(1.0, eff_w)))))
@@ -1709,15 +1943,16 @@ async def generate_lithophane_3d_stl(session_id: str, req: LithoPreviewRequest):
 
             globe_labels = {
                 "custom_photo": "Boule Lithophanie Photo",
-                "planet_moon": "Boule Lithophanie — La Lune (Cratères HD)",
-                "planet_earth": "Boule Lithophanie — La Terre",
-                "planet_mars": "Boule Lithophanie — Mars",
-                "planet_jupiter": "Boule Lithophanie — Jupiter",
-                "planet_saturn": "Boule Lithophanie — Sci-Fi / Saturne",
                 "external_stl": f"Boule Import STL ({state.external_globe_filename or 'Planète'})",
+                **{p["id"]: f"Globe Officiel — {p['label']}" for p in OFFICIAL_PLANET_CATALOG},
             }
             stand_labels = {
-                "ring_bambu": "Socle Anneau Minimaliste (Standard Lampe)",
+                "stand_bambu_official": "Socle Officiel Bambu Lab (STL Authentique)",
+                "stand_rock_lunar": "Socle Rocheux Lunaire (STL Authentique)",
+                "stand_wavy_moon": "Socle Design Ondulé Wavy (STL Authentique)",
+                "stand_legacy_smooth": "Socle Classique Lisse (STL Authentique)",
+                "stand_legacy_threaded": "Socle Classique Fileté (STL Authentique)",
+                "ring_bambu": "Socle Anneau Minimaliste (Paramétrique)",
                 "tripod_modern": "Socle Trépied Design 3 Pieds",
                 "pedestal_fluted": "Socle Piédestal Architectural Cannelé",
                 "crown_gothic": "Socle Couronne 4 Griffes",

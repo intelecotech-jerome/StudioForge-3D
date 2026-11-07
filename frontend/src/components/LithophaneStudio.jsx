@@ -13,14 +13,50 @@ const SHAPE_OPTIONS = [
   {
     id: 'sphere_globe',
     icon: '🌕',
-    title: 'Boule / Globe + Socle',
-    desc: 'Sphère Photo, Lune ou Planètes + 4 Socles Lampe LED',
+    title: 'Boule / Planètes Officiel',
+    desc: '19 Planètes & Lunes STL officielles ou Photo + 9 Socles LED',
   },
   {
     id: 'cylinder_lamp',
-    icon: '🏮',
+    icon: '🕯️',
     title: 'Abat-Jour Cylindre 360°',
     desc: 'Taille auto-adaptée à l’image + Support Lampe surélevé & fil',
+  },
+  {
+    id: 'polygon_lantern',
+    icon: '🏮',
+    title: 'Polygon / Lanterne (5–8 Faces)',
+    desc: 'Lanterne multi-facettes + anneaux suspension + support lampe',
+  },
+  {
+    id: 'cone_lampshade',
+    icon: '📐',
+    title: 'Cone / Abat-Jour Conique',
+    desc: 'Abat-jour conique évasé 360° + support lampe LED intégré',
+  },
+  {
+    id: 'vase_lumina',
+    icon: '🏺',
+    title: 'Vase / Amphore Lumineuse',
+    desc: 'Vase galbé 360° design porcelaine + support lampe LED',
+  },
+  {
+    id: 'accordion_dual',
+    icon: '🪗',
+    title: 'Dual / Paravent Zig-Zag',
+    desc: '2 à 4 volets pliés en accordéon (tient debout tout seul)',
+  },
+  {
+    id: 'balloon_heart',
+    icon: '🎈',
+    title: 'Balloon / Cœur Bombé 3D',
+    desc: 'Coussin Cœur gonflé en volume 3D + socle veilleuse intégré',
+  },
+  {
+    id: 'stencil_cutout',
+    icon: '🦒',
+    title: 'Stencil / Silhouette Détourée',
+    desc: 'Fond découpé autour du sujet + contour renforcé + socle',
   },
   {
     id: 'framed_lightbox',
@@ -42,7 +78,7 @@ const SHAPE_OPTIONS = [
   },
   {
     id: 'half_cylinder',
-    icon: '🕯️',
+    icon: '🌓',
     title: 'Demi-Cylindre 180°',
     desc: 'Applique / Veilleuse dôme 180° haute stabilité',
   },
@@ -61,6 +97,7 @@ const FLAT_LAYOUT_OPTIONS = [
   { id: 'single_octagon', label: '⯃ Octogone', group: 'Forme Unique' },
   { id: 'single_arch', label: '🏛️ Arche / Vitrail', group: 'Forme Unique' },
   { id: 'multi_grid_squares', label: '⊞ Grille Sur-Mesure (L × H Carrés)', group: 'Multi-Tuiles' },
+  { id: 'multi_puzzle', label: '🧩 Puzzle 3D Imbriqué (L × H Pièces Jigsaw)', group: 'Multi-Tuiles' },
   { id: 'multi_4_squares', label: '田 Quadriptyque (2×2 Carrés)', group: 'Multi-Tuiles' },
   { id: 'multi_7_hexagons', label: '❖ Ruche 7 Hexagones (Nid d’Abeille)', group: 'Multi-Tuiles' },
   { id: 'multi_4_triangles', label: '▲ Triforce 4 Triangles', group: 'Multi-Tuiles' },
@@ -68,20 +105,39 @@ const FLAT_LAYOUT_OPTIONS = [
 ];
 
 const GLOBE_SOURCES = [
-  { id: 'custom_photo', icon: '📷', label: 'Ma Photo (ou 1–4 Photos)' },
-  { id: 'planet_moon', icon: '🌕', label: 'La Lune (Cratères HD)' },
-  { id: 'planet_earth', icon: '🌍', label: 'La Terre (Continents)' },
-  { id: 'planet_mars', icon: '🔴', label: 'Mars (Olympus Mons)' },
-  { id: 'planet_jupiter', icon: '🟠', label: 'Jupiter (Grande Tache)' },
-  { id: 'planet_saturn', icon: '🪐', label: 'Planète Sci-Fi' },
-  { id: 'external_stl', icon: '📂', label: 'Importer un .STL Planète' },
+  { id: 'custom_photo', icon: '📷', label: 'Ma Photo (ou 1–4 Photos)', group: 'Photo & Import' },
+  { id: 'external_stl', icon: '📂', label: 'Importer un .STL Externe', group: 'Photo & Import' },
+  { id: 'planet_moon', icon: '🌕', label: 'La Lune (NASA Officiel HD)', group: 'Lunes & Sci-Fi' },
+  { id: 'planet_death_star', icon: '🛸', label: 'Étoile de la Mort (Star Wars)', group: 'Lunes & Sci-Fi' },
+  { id: 'planet_earth', icon: '🌍', label: 'La Terre — Frontières & Pays (comme votre photo)', group: 'La Terre (4 Versions)' },
+  { id: 'planet_earth_topo', icon: '🏔️', label: 'La Terre — Topographie Pure', group: 'La Terre (4 Versions)' },
+  { id: 'planet_earth_day', icon: '☀️', label: 'La Terre — Vue Jour & Nuages', group: 'La Terre (4 Versions)' },
+  { id: 'planet_earth_bathy', icon: '🌊', label: 'La Terre — Bathymétrie Océans & Pays', group: 'La Terre (4 Versions)' },
+  { id: 'planet_mars', icon: '🔴', label: 'Mars (Olympus Mons & Canyons)', group: 'Système Solaire' },
+  { id: 'planet_jupiter', icon: '🟠', label: 'Jupiter (Bandes & Grande Tache)', group: 'Système Solaire' },
+  { id: 'planet_saturn', icon: '🪐', label: 'Saturne (Atmosphère)', group: 'Système Solaire' },
+  { id: 'planet_venus', icon: '🟡', label: 'Vénus — Surface Volcanique', group: 'Système Solaire' },
+  { id: 'planet_venus_atmo', icon: '☁️', label: 'Vénus — Atmosphère', group: 'Système Solaire' },
+  { id: 'planet_mercury', icon: '🪨', label: 'Mercure (Cratères)', group: 'Système Solaire' },
+  { id: 'planet_uranus', icon: '🩵', label: 'Uranus', group: 'Système Solaire' },
+  { id: 'planet_neptune', icon: '🔵', label: 'Neptune', group: 'Système Solaire' },
+  { id: 'planet_pluto', icon: '❄️', label: 'Pluton (Cœur Tombaugh)', group: 'Système Solaire' },
+  { id: 'planet_sun', icon: '☀️', label: 'Le Soleil (Éruptions)', group: 'Système Solaire' },
+  { id: 'planet_europa', icon: '🧊', label: 'Europe (Lune Glacée de Jupiter)', group: 'Lunes & Sci-Fi' },
+  { id: 'planet_callisto', icon: '🌑', label: 'Callisto (Lune Cratérisée)', group: 'Lunes & Sci-Fi' },
+  { id: 'planet_universe', icon: '🌌', label: 'Expansion de l’Univers (Cosmologie)', group: 'Lunes & Sci-Fi' },
 ];
 
 const GLOBE_STANDS = [
-  { id: 'ring_bambu', icon: '⭕', title: 'Socle Anneau Bambu', desc: 'Bague basse épurée + encoche câble' },
-  { id: 'tripod_modern', icon: '🛸', title: 'Socle Trépied Courbé', desc: '3 bras design + berceau LED suspendu' },
+  { id: 'stand_bambu_official', icon: '⭐', title: 'Socle Officiel Bambu', desc: 'Votre STL officiel 04_bambu_base.stl' },
+  { id: 'stand_rock_lunar', icon: '🪨', title: 'Socle Rocheux Lunaire', desc: 'Votre STL officiel 05_rock_base.stl' },
+  { id: 'stand_wavy_moon', icon: '🌊', title: 'Socle Ondulé Wavy', desc: 'Votre STL Moon Lamp Wavy Stand' },
+  { id: 'stand_legacy_smooth', icon: '💿', title: 'Socle Classique Lisse', desc: 'Votre STL 02_legacy_base_no_threads' },
+  { id: 'stand_legacy_threaded', icon: '🔩', title: 'Socle Classique Fileté', desc: 'Votre STL 02_legacy_base_threaded' },
+  { id: 'ring_bambu', icon: '⭕', title: 'Socle Anneau Paramétrique', desc: 'S’adapte à tout diamètre de lampe' },
+  { id: 'tripod_modern', icon: '🛸', title: 'Socle Trépied 3 Pieds', desc: '3 bras design + berceau LED suspendu' },
   { id: 'pedestal_fluted', icon: '🏛️', title: 'Piédestal Cannelé', desc: 'Colonne striée architecturale' },
-  { id: 'crown_gothic', icon: '👑', title: 'Socle Couronne 4 Griffes', desc: '4 arches royales enlaçant la boule' },
+  { id: 'crown_gothic', icon: '👑', title: 'Couronne 4 Griffes', desc: '4 arches royales enlaçant la boule' },
 ];
 
 const LED_TINTS = [
@@ -131,8 +187,12 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
   const [gridRows, setGridRows] = useState(2);
 
   const [globeSourceMode, setGlobeSourceMode] = useState('custom_photo');
-  const [globeStandStyle, setGlobeStandStyle] = useState('ring_bambu');
+  const [globeStandStyle, setGlobeStandStyle] = useState('stand_bambu_official');
   const [sphereDiameterMm, setSphereDiameterMm] = useState(140.0);
+
+  // New Architecture Controls (Accordion Dual & Polygon Lantern)
+  const [accordionPanels, setAccordionPanels] = useState(3);
+  const [polygonSides, setPolygonSides] = useState(6);
 
   const [widthMm, setWidthMm] = useState(140.0);
   const [effectiveWidthMm, setEffectiveWidthMm] = useState(140.0);
@@ -317,6 +377,8 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
     globe_source_mode: globeSourceMode,
     globe_stand_style: globeStandStyle,
     sphere_diameter_mm: Number(sphereDiameterMm),
+    accordion_panels: Number(accordionPanels),
+    polygon_sides: Number(polygonSides),
     add_hanging_ring: Boolean(addHangingRing),
     add_stand_feet: Boolean(addStandFeet),
     stand_vertical_for_print: Boolean(standVerticalForPrint),
@@ -492,6 +554,8 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
     gridRows,
     globeSourceMode,
     sphereDiameterMm,
+    accordionPanels,
+    polygonSides,
     widthMm,
     cylinderDiameterMm,
     autoAdaptCylinder,
@@ -546,10 +610,22 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
     setStlPreviewUrl(`${API_BASE}/api/lithophane/${sessionId}/preview-stl?part_index=${partIndex}&t=${Date.now()}`);
   };
 
-  const showLampMountControls = ['cylinder_lamp', 'sphere_globe', 'framed_lightbox', 'cube_lightbox'].includes(shapeMode);
+  const showLampMountControls = [
+    'cylinder_lamp',
+    'polygon_lantern',
+    'cone_lampshade',
+    'vase_lumina',
+    'sphere_globe',
+    'framed_lightbox',
+    'cube_lightbox',
+  ].includes(shapeMode);
   const showMultiImagePanel =
     shapeMode === 'cube_lightbox' ||
     shapeMode === 'cylinder_lamp' ||
+    shapeMode === 'polygon_lantern' ||
+    shapeMode === 'cone_lampshade' ||
+    shapeMode === 'vase_lumina' ||
+    shapeMode === 'accordion_dual' ||
     (shapeMode === 'sphere_globe' && globeSourceMode === 'custom_photo');
 
   return (
@@ -807,7 +883,7 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
                 ))}
               </select>
 
-              {flatLayoutMode === 'multi_grid_squares' && (
+              {(flatLayoutMode === 'multi_grid_squares' || flatLayoutMode === 'multi_puzzle') && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                   <label className="field-label" style={{ flex: 1 }}>
                     <span>Largeur (Colonnes) : {gridCols}</span>
@@ -836,7 +912,7 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
             </div>
           )}
 
-          {/* SUB-PANEL B : SPHERE / GLOBE SOURCE (PHOTO / PLANETS / STL) & 4 SOCLES */}
+          {/* SUB-PANEL B : SPHERE / GLOBE SOURCE (19 OFFICIAL PLANETS / PHOTO / STL) & 9 SOCLES */}
           {shapeMode === 'sphere_globe' && (
             <div
               style={{
@@ -848,41 +924,77 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
               }}
             >
               <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#00f0ff', marginBottom: 5 }}>
-                🌕 Modèle de la Boule (Photo, Lune, Planètes ou Import STL) :
+                🌕 Source du Globe (Vos 19 Planètes & Lunes STL Officielles ou Photo) :
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
-                {GLOBE_SOURCES.map((gs) => {
-                  const act = globeSourceMode === gs.id;
+              <select
+                value={globeSourceMode}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.startsWith('planet_')) {
+                    handleInitPlanetSession(val);
+                  } else if (val === 'external_stl') {
+                    externalStlRef.current?.click();
+                  } else {
+                    setGlobeSourceMode(val);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  background: '#090d16',
+                  color: '#f8fafc',
+                  border: '1px solid #00f0ff',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  fontSize: '0.73rem',
+                  fontWeight: 600,
+                  marginBottom: 6,
+                }}
+              >
+                {GLOBE_SOURCES.map((gs) => (
+                  <option key={gs.id} value={gs.id}>
+                    [{gs.group}] {gs.icon} {gs.label}
+                  </option>
+                ))}
+              </select>
+
+              {/* Quick Planet Shortcuts */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, marginBottom: 8 }}>
+                {[
+                  { id: 'planet_moon', label: '🌕 Lune' },
+                  { id: 'planet_earth', label: '🌍 Terre Pays' },
+                  { id: 'planet_mars', label: '🔴 Mars' },
+                  { id: 'planet_death_star', label: '🛸 Death Star' },
+                  { id: 'planet_jupiter', label: '🟠 Jupiter' },
+                  { id: 'planet_saturn', label: '🪐 Saturne' },
+                  { id: 'planet_earth_topo', label: '🏔️ Terre Topo' },
+                  { id: 'custom_photo', label: '📷 Ma Photo' },
+                ].map((q) => {
+                  const act = globeSourceMode === q.id;
                   return (
                     <button
-                      key={gs.id}
+                      key={q.id}
                       type="button"
                       onClick={() => {
-                        if (gs.id.startsWith('planet_')) {
-                          handleInitPlanetSession(gs.id);
-                        } else if (gs.id === 'external_stl') {
-                          externalStlRef.current?.click();
-                        } else {
-                          setGlobeSourceMode(gs.id);
-                        }
+                        if (q.id.startsWith('planet_')) handleInitPlanetSession(q.id);
+                        else setGlobeSourceMode(q.id);
                       }}
                       style={{
-                        padding: '5px 6px',
-                        borderRadius: 5,
+                        padding: '4px 5px',
+                        borderRadius: 4,
                         border: act ? '1px solid #00f0ff' : '1px solid #1e293b',
                         background: act ? 'rgba(0, 240, 255, 0.16)' : '#090d16',
                         color: act ? '#00f0ff' : '#cbd5e1',
-                        fontSize: '0.68rem',
+                        fontSize: '0.64rem',
                         fontWeight: act ? 700 : 500,
                         cursor: 'pointer',
-                        textAlign: 'left',
                       }}
                     >
-                      {gs.icon} {gs.label}
+                      {q.label}
                     </button>
                   );
                 })}
               </div>
+
               <input
                 type="file"
                 accept=".stl"
@@ -909,7 +1021,7 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
               </label>
 
               <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#38bdf8', margin: '6px 0 4px' }}>
-                🏛️ Choix du Socle Porte-Lampe (avec logement LED & encoche fil) :
+                🏛️ Choix du Socle Porte-Lampe (5 Socles STL Officiels + 4 Paramétriques) :
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
                 {GLOBE_STANDS.map((st) => {
@@ -929,10 +1041,10 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
                         textAlign: 'left',
                       }}
                     >
-                      <div style={{ fontSize: '0.70rem', fontWeight: 700, color: act ? '#38bdf8' : '#e2e8f0' }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: act ? '#38bdf8' : '#e2e8f0' }}>
                         {st.icon} {st.title}
                       </div>
-                      <div style={{ fontSize: '0.61rem', color: '#94a3b8' }}>{st.desc}</div>
+                      <div style={{ fontSize: '0.59rem', color: '#94a3b8' }}>{st.desc}</div>
                     </button>
                   );
                 })}
@@ -940,12 +1052,92 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
             </div>
           )}
 
+          {/* SUB-PANEL C : ACCORDION DUAL (2 TO 4 PANELS) */}
+          {shapeMode === 'accordion_dual' && (
+            <div
+              style={{
+                padding: '8px',
+                borderRadius: 7,
+                background: 'rgba(15, 23, 42, 0.78)',
+                border: '1px solid #1e293b',
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#00f0ff', marginBottom: 6 }}>
+                🪗 Nombre de Volets Pliés en Accordéon (Autoportant) :
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[2, 3, 4].map((np) => (
+                  <button
+                    key={np}
+                    type="button"
+                    onClick={() => setAccordionPanels(np)}
+                    style={{
+                      flex: 1,
+                      padding: '6px',
+                      borderRadius: 6,
+                      border: accordionPanels === np ? '1px solid #00f0ff' : '1px solid #334155',
+                      background: accordionPanels === np ? 'rgba(0, 240, 255, 0.16)' : '#090d16',
+                      color: accordionPanels === np ? '#00f0ff' : '#cbd5e1',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {np} Volets ({np === 2 ? 'Dual V' : np === 3 ? 'Triptyque Z' : 'Paravent W'})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* SUB-PANEL D : POLYGON LANTERN (5, 6, OR 8 FACES) */}
+          {shapeMode === 'polygon_lantern' && (
+            <div
+              style={{
+                padding: '8px',
+                borderRadius: 7,
+                background: 'rgba(15, 23, 42, 0.78)',
+                border: '1px solid #1e293b',
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#00f0ff', marginBottom: 6 }}>
+                🏮 Nombre de Faces de la Lanterne Polygone :
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[5, 6, 8].map((ns) => (
+                  <button
+                    key={ns}
+                    type="button"
+                    onClick={() => setPolygonSides(ns)}
+                    style={{
+                      flex: 1,
+                      padding: '6px',
+                      borderRadius: 6,
+                      border: polygonSides === ns ? '1px solid #00f0ff' : '1px solid #334155',
+                      background: polygonSides === ns ? 'rgba(0, 240, 255, 0.16)' : '#090d16',
+                      color: polygonSides === ns ? '#00f0ff' : '#cbd5e1',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {ns} Faces ({ns === 5 ? 'Pentagone' : ns === 6 ? 'Hexagone' : 'Octogone'})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* DIMENSIONS SLIDERS */}
-          {shapeMode !== 'cylinder_lamp' && shapeMode !== 'sphere_globe' && (
+          {!['cylinder_lamp', 'polygon_lantern', 'cone_lampshade', 'vase_lumina', 'sphere_globe'].includes(shapeMode) && (
             <label className="field-label">
               <span>
                 {shapeMode === 'cube_lightbox'
                   ? `Largeur Face Cube : ${widthMm} mm`
+                  : shapeMode === 'balloon_heart'
+                  ? `Largeur Cœur Bombé 3D : ${widthMm} mm`
                   : flatLayoutMode !== 'single_original'
                   ? `Taille Unitaire Forme / Tuile : ${widthMm} mm`
                   : `Largeur du Panneau : ${widthMm} mm (Hauteur auto: ${effectiveHeightMm} mm)`}
@@ -975,11 +1167,11 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
             </label>
           )}
 
-          {shapeMode === 'cylinder_lamp' && (
+          {['cylinder_lamp', 'polygon_lantern', 'cone_lampshade', 'vase_lumina'].includes(shapeMode) && (
             <>
               <label className="field-label">
                 <span>
-                  Diamètre du Cylindre : Ø {cylinderDiameterMm} mm (Hauteur : {effectiveHeightMm} mm)
+                  Diamètre Extérieur : Ø {cylinderDiameterMm} mm (Hauteur : {effectiveHeightMm} mm)
                 </span>
                 <input
                   type="range"
@@ -996,7 +1188,7 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
                   checked={autoAdaptCylinder}
                   onChange={(e) => setAutoAdaptCylinder(e.target.checked)}
                 />
-                <span>Adapter automatiquement la hauteur du cylindre au ratio de l’image (360° complet)</span>
+                <span>Adapter automatiquement la hauteur au ratio de l’image (360° complet)</span>
               </label>
             </>
           )}
@@ -1652,6 +1844,8 @@ export default function LithophaneStudio({ bedSize = [300, 300, 300] }) {
                 maxThicknessMm,
                 tdMm,
                 shapeMode,
+                sphereDiameterMm,
+                cylinderDiameterMm,
                 standVertical: standVerticalForPrint && flatLayoutMode === 'single_original',
               }}
             />

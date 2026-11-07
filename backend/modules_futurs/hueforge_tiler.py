@@ -59,6 +59,7 @@ LayoutMode = Literal[
     "multi_4_squares",
     "multi_grid_squares",
     "multi_15_squares",
+    "multi_puzzle",
     "multi_7_hexagons",
     "multi_6_triangles",
     "multi_4_triangles",
@@ -127,6 +128,8 @@ class HueForgeSession:
     last_zip_bytes: Optional[bytes] = None
     last_3mf_bytes: Optional[bytes] = None
     last_preview_mesh: Optional[trimesh.Trimesh] = None
+    custom_popout_mesh: Optional[trimesh.Trimesh] = None
+    custom_popout_filename: Optional[str] = None
 
 
 HUEFORGE_SESSIONS: Dict[str, HueForgeSession] = {}
@@ -2776,6 +2779,18 @@ def render_quantized_preview_base64(
     border_width_mm: float = 2.5,
     return_dual_studio: bool = False,
     highlight_layer_idx: Optional[int] = None,
+    popout_mode: str = "none",
+    popout_preset_stl: str = "starship_falcon",
+    custom_popout_mesh: Optional[trimesh.Trimesh] = None,
+    popout_scale_pct: float = 60.0,
+    popout_pitch_deg: float = 32.0,
+    popout_yaw_deg: float = 0.0,
+    popout_roll_deg: float = -12.0,
+    popout_offset_x_pct: float = 0.0,
+    popout_offset_y_pct: float = 0.0,
+    popout_sink_pct: float = 28.0,
+    popout_puff_height_mm: float = 8.5,
+    popout_hex_color: str = "#94a3b8",
 ) -> Any:
     """
     Simulates the HueForge 1D Z-stack filament blending directly from `pixel_z`,
@@ -2917,12 +2932,40 @@ def render_quantized_preview_base64(
 
     inside_mask: Optional[np.ndarray] = None
     rim_mask: Optional[np.ndarray] = None
+    bbox_2d_prev: Tuple[float, float, float, float] = (-100.0 * aspect_ratio, -100.0, 100.0 * aspect_ratio, 100.0)
     if tiles:
+        union_p = sg.MultiPolygon([t[1] for t in tiles])
+        bbox_2d_prev = union_p.bounds
         inside_mask, rim_mask = _rasterize_layout_masks(tiles, border_style, border_width_mm, pw, ph)
         if rim_mask is not None and np.any(rim_mask):
             rim_rgb = rgbs[-1] if border_style == "raised_top" else rgbs[0]
             out_rgb[rim_mask] = rim_rgb
 
+    if popout_mode and popout_mode != "none":
+        from modules_futurs.hueforge_popout import render_popout_2d_preview_overlay
+
+        inner_subject_mask = (inside_mask & (~rim_mask)) if (inside_mask is not None and rim_mask is not None) else inside_mask
+        out_rgb = render_popout_2d_preview_overlay(
+            out_rgb=out_rgb,
+            small_rgb=small,
+            bbox_2d=bbox_2d_prev,
+            plaque_top_z_mm=float(max_z),
+            popout_mode=popout_mode,
+            popout_preset_stl=popout_preset_stl,
+            custom_popout_mesh=custom_popout_mesh,
+            popout_scale_pct=popout_scale_pct,
+            popout_pitch_deg=popout_pitch_deg,
+            popout_yaw_deg=popout_yaw_deg,
+            popout_roll_deg=popout_roll_deg,
+            popout_offset_x_pct=popout_offset_x_pct,
+            popout_offset_y_pct=popout_offset_y_pct,
+            popout_sink_pct=popout_sink_pct,
+            popout_puff_height_mm=popout_puff_height_mm,
+            popout_hex_color=popout_hex_color,
+            inside_mask=inner_subject_mask,
+        )
+
+    if tiles and inside_mask is not None:
         # Studio background outside the cut shape with subtle ambient glow
         bg_studio = np.array([8.0, 12.0, 20.0], dtype=np.float32)
         glow = gaussian_filter(inside_mask.astype(np.float32), sigma=4.5)[:, :, None]
@@ -3236,13 +3279,82 @@ def build_layout_polygons(
             ("Tri_Pyramid_04_Center.stl", t4),
         ]
 
+    if layout_mode == "multi_puzzle":
+        cols = max(2, min(8, int(grid_cols)))
+        rows = max(2, min(8, int(grid_rows)))
+        clearance = 0.16  # 0.16mm 3D print clearance so jigsaw pieces snap together smoothly
+        neck_w = s * 0.13
+        neck_l = s * 0.10
+        head_r = s * 0.125
+
+        def _make_jigsaw_tab(mx: float, my: float, nx_d: float, ny_d: float, extra_tol: float = 0.0) -> sg.Polygon:
+            tx, ty = -ny_d, nx_d
+            hw = neck_w * 0.5 + extra_tol
+            nl = neck_l + head_r * 0.65
+            p1 = (mx - tx * hw - nx_d * 0.4, my - ty * hw - ny_d * 0.4)
+            p2 = (mx + tx * hw - nx_d * 0.4, my + ty * hw - ny_d * 0.4)
+            p3 = (mx + tx * hw + nx_d * nl, my + ty * hw + ny_d * nl)
+            p4 = (mx - tx * hw + nx_d * nl, my - ty * hw + ny_d * nl)
+            neck_box = sg.Polygon([p1, p2, p3, p4])
+            head_center = sg.Point(mx + nx_d * (neck_l + head_r * 0.65), my + ny_d * (neck_l + head_r * 0.65))
+            head_circle = head_center.buffer(head_r + extra_tol, resolution=32)
+            return neck_box.union(head_circle)
+
+        tiles = []
+        idx = 1
+        for r_idx in range(rows):
+            cy = ((rows - 1) / 2.0 - r_idx) * s
+            for c_idx in range(cols):
+                cx = (c_idx - (cols - 1) / 2.0) * s
+                piece = sg.box(cx - s / 2.0, cy - s / 2.0, cx + s / 2.0, cy + s / 2.0)
+
+                if c_idx < cols - 1:
+                    sign = 1.0 if ((r_idx + c_idx) % 2 == 0) else -1.0
+                    ex = cx + s / 2.0
+                    ey = cy + sign * (s * 0.04)
+                    if sign > 0:
+                        piece = piece.union(_make_jigsaw_tab(ex, ey, 1.0, 0.0, 0.0))
+                    else:
+                        piece = piece.difference(_make_jigsaw_tab(ex, ey, -1.0, 0.0, clearance))
+
+                if c_idx > 0:
+                    sign_prev = 1.0 if ((r_idx + c_idx - 1) % 2 == 0) else -1.0
+                    ex = cx - s / 2.0
+                    ey = cy + sign_prev * (s * 0.04)
+                    if sign_prev > 0:
+                        piece = piece.difference(_make_jigsaw_tab(ex, ey, 1.0, 0.0, clearance))
+                    else:
+                        piece = piece.union(_make_jigsaw_tab(ex, ey, -1.0, 0.0, 0.0))
+
+                if r_idx < rows - 1:
+                    sign = 1.0 if ((r_idx * 3 + c_idx) % 2 == 0) else -1.0
+                    ex = cx - sign * (s * 0.04)
+                    ey = cy - s / 2.0
+                    if sign > 0:
+                        piece = piece.union(_make_jigsaw_tab(ex, ey, 0.0, -1.0, 0.0))
+                    else:
+                        piece = piece.difference(_make_jigsaw_tab(ex, ey, 0.0, 1.0, clearance))
+
+                if r_idx > 0:
+                    sign_prev = 1.0 if (((r_idx - 1) * 3 + c_idx) % 2 == 0) else -1.0
+                    ex = cx - sign_prev * (s * 0.04)
+                    ey = cy + s / 2.0
+                    if sign_prev > 0:
+                        piece = piece.difference(_make_jigsaw_tab(ex, ey, 0.0, -1.0, clearance))
+                    else:
+                        piece = piece.union(_make_jigsaw_tab(ex, ey, 0.0, 1.0, 0.0))
+
+                tiles.append((f"Puzzle_{idx:02d}_R{r_idx+1}C{c_idx+1}.stl", piece))
+                idx += 1
+        return tiles
+
     raise ValueError(f"Mode de découpe inconnu: {layout_mode}")
 
 
 def find_shared_edges_midpoints(tiles: List[Tuple[str, sg.Polygon]]) -> List[Tuple[float, float, float]]:
     midpoints: List[Tuple[float, float, float]] = []
     n = len(tiles)
-    if n <= 1:
+    if n <= 1 or (n > 0 and tiles[0][0].startswith("Puzzle_")):
         return midpoints
 
     for i in range(n):
@@ -3282,6 +3394,11 @@ def build_hueforge_heightfield_manifold(
     fill_mode: FillMode = "smart_aura",
     art_style: ArtStyle = "standard",
     art_intensity: float = 1.0,
+    popout_mode: str = "none",
+    popout_puff_height_mm: float = 8.5,
+    popout_scale_pct: float = 60.0,
+    popout_offset_x_pct: float = 0.0,
+    popout_offset_y_pct: float = 0.0,
 ) -> m3d.Manifold:
     """
     Generates a high-resolution watertight 3D heightfield Manifold over `bbox_2d = (minx, miny, maxx, maxy)`
@@ -3344,6 +3461,28 @@ def build_hueforge_heightfield_manifold(
             art_intensity=art_intensity,
             void_mask=void_mask,
         )
+
+    if popout_mode == "image_puff_3d":
+        from modules_futurs.hueforge_popout import compute_subject_puff_dome
+
+        puff_offset, fg_mask, _ = compute_subject_puff_dome(
+            np.flipud(arr),
+            puff_height_mm=popout_puff_height_mm,
+            scale_pct=popout_scale_pct,
+            offset_x_pct=popout_offset_x_pct,
+            offset_y_pct=popout_offset_y_pct,
+        )
+        puff_offset = np.flipud(puff_offset)
+        fg_mask = np.flipud(fg_mask)
+        is_puffed = fg_mask & (puff_offset > 0.06)
+        if np.any(is_puffed):
+            b_z = float(specs[0].end_mm) if specs else base_thickness_mm
+            m_z = float(specs[-1].end_mm) if specs else max_total_height_mm
+            norm_hf = np.clip((z_top - b_z) / max(0.08, m_z - b_z), 0.0, 1.0)
+            z_raw = np.maximum(m_z + 0.08, z_top + puff_offset)
+            z_step = np.floor(z_raw * 20.0) / 20.0
+            z_encoded = z_step + (0.05 + 0.90 * norm_hf) / 20.0
+            z_top = np.where(is_puffed, z_encoded, z_top)
 
     xs = np.linspace(minx, maxx, nx, dtype=np.float32)
     ys = np.linspace(miny, maxy, ny, dtype=np.float32)
@@ -3694,6 +3833,22 @@ class HueForgeGenerateRequest(BaseModel):
         description="Optional layer index (0..K-1) to isolate/highlight on the 2D HueForge preview",
     )
 
+    # 3D Pop-Out & Diorama Controls (Millennium Falcon / Jolteon VMAX / Inclined Wedge Stand)
+    popout_mode: Literal["none", "stl_popout", "image_puff_3d"] = "none"
+    popout_preset_stl: str = "starship_falcon"
+    popout_assembly: Literal["monobloc_fusion", "snap_fit_socket"] = "monobloc_fusion"
+    popout_scale_pct: float = Field(default=62.0, ge=15.0, le=130.0)
+    popout_pitch_deg: float = Field(default=32.0, ge=-85.0, le=85.0)
+    popout_yaw_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    popout_roll_deg: float = Field(default=-12.0, ge=-85.0, le=85.0)
+    popout_offset_x_pct: float = Field(default=0.0, ge=-80.0, le=80.0)
+    popout_offset_y_pct: float = Field(default=0.0, ge=-80.0, le=80.0)
+    popout_sink_pct: float = Field(default=28.0, ge=0.0, le=75.0)
+    popout_puff_height_mm: float = Field(default=8.5, ge=2.0, le=25.0)
+    popout_hex_color: str = "#94a3b8"
+    add_inclined_stand: bool = False
+    stand_angle_deg: float = Field(default=45.0, ge=25.0, le=70.0)
+
 
 @router.get("/status")
 async def hueforge_status():
@@ -3845,6 +4000,18 @@ async def reanalyze_hueforge_palette_on_crop(session_id: str, req: HueForgeGener
         art_style=req.art_style,
         art_intensity=req.art_intensity,
         highlight_layer_idx=req.highlight_layer_idx,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
 
     shape_overlay_b64 = render_shape_overlay_base64(
@@ -3939,6 +4106,18 @@ async def optimize_hueforge_spool_order_endpoint(session_id: str, req: HueForgeG
         art_style=req.art_style,
         art_intensity=req.art_intensity,
         highlight_layer_idx=req.highlight_layer_idx,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
 
     shape_overlay_b64 = render_shape_overlay_base64(
@@ -4019,6 +4198,18 @@ async def update_hueforge_palette_preview(session_id: str, req: HueForgeGenerate
         art_style=req.art_style,
         art_intensity=req.art_intensity,
         highlight_layer_idx=req.highlight_layer_idx,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
 
     shape_overlay_b64 = render_shape_overlay_base64(
@@ -4138,6 +4329,18 @@ async def apply_and_bake_outpaint_endpoint(session_id: str, req: HueForgeGenerat
         art_style=req.art_style,
         art_intensity=req.art_intensity,
         highlight_layer_idx=req.highlight_layer_idx,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
 
     shape_overlay_b64 = render_shape_overlay_base64(
@@ -4219,6 +4422,18 @@ async def reset_outpaint_to_original_endpoint(session_id: str, req: HueForgeGene
         art_style=req.art_style,
         art_intensity=req.art_intensity,
         highlight_layer_idx=req.highlight_layer_idx,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
 
     shape_overlay_b64 = render_shape_overlay_base64(
@@ -4298,6 +4513,11 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
         fill_mode=req.fill_mode,
         art_style=req.art_style,
         art_intensity=req.art_intensity,
+        popout_mode=req.popout_mode,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
     )
 
     seams = find_shared_edges_midpoints(tiles) if (len(tiles) > 1 and req.add_back_connectors) else []
@@ -4316,8 +4536,45 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
     preview_meshes: List[trimesh.Trimesh] = []
     parts_meta: List[Dict[str, Any]] = []
 
+    # --- OPTIONAL 3D POP-OUT & DIORAMA HYBRID PROCESSING ---
+    from modules_futurs.hueforge_popout import (
+        build_inclined_display_stand,
+        build_procedural_popout_stl,
+        position_and_clip_popout_stl,
+    )
+
+    popout_union_mani: Optional[m3d.Manifold] = None
+    popout_socket_mani: Optional[m3d.Manifold] = None
+    popout_separate_mesh: Optional[trimesh.Trimesh] = None
+
+    if req.popout_mode == "stl_popout":
+        if req.popout_preset_stl == "custom_stl" and sess.custom_popout_mesh is not None:
+            src_pop_mesh = sess.custom_popout_mesh
+        else:
+            src_pop_mesh = build_procedural_popout_stl(req.popout_preset_stl)
+
+        popout_union_mani, popout_socket_mani, popout_separate_mesh = position_and_clip_popout_stl(
+            raw_mesh=src_pop_mesh,
+            bbox_2d=bbox_2d,
+            plaque_top_z_mm=total_height_mm,
+            scale_pct=req.popout_scale_pct,
+            pitch_deg=req.popout_pitch_deg,
+            yaw_deg=req.popout_yaw_deg,
+            roll_deg=req.popout_roll_deg,
+            offset_x_pct=req.popout_offset_x_pct,
+            offset_y_pct=req.popout_offset_y_pct,
+            sink_pct=req.popout_sink_pct,
+            assembly_mode=req.popout_assembly,
+        )
+
+    prism_clip_h = (
+        total_height_mm + float(req.popout_puff_height_mm) + 15.0
+        if req.popout_mode == "image_puff_3d"
+        else total_height_mm + 4.0
+    )
+
     for idx, (t_name, poly) in enumerate(tiles, start=1):
-        prism = _polygon_to_prism_manifold(poly, height=total_height_mm + 4.0)
+        prism = _polygon_to_prism_manifold(poly, height=prism_clip_h)
         tile_mani = hf_mani ^ prism
 
         # Apply Optional Integrated Frame / Border Rim around each tile
@@ -4329,6 +4586,13 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
             base_thickness_mm=specs[0].end_mm,
             total_height_mm=total_height_mm,
         )
+
+        # Apply 3D Pop-Out Union (Monobloc) or Female Socket (Snap-Fit)
+        if popout_union_mani is not None:
+            tile_push_prism = _polygon_to_prism_manifold(poly, height=350.0)
+            tile_mani = tile_mani + (popout_union_mani ^ tile_push_prism)
+        elif popout_socket_mani is not None:
+            tile_mani = tile_mani - popout_socket_mani
 
         # Subtract shared back-side female sockets touching this tile
         for s_mani in seam_manifolds:
@@ -4393,6 +4657,40 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
             "faces_count": int(len(clips_plate.faces)),
         })
 
+    if req.popout_mode == "stl_popout" and req.popout_assembly == "snap_fit_socket" and popout_separate_mesh is not None:
+        preview_meshes.append(popout_separate_mesh.copy())
+        pop_centered = popout_separate_mesh.copy()
+        bp = pop_centered.bounds
+        pop_centered.apply_translation([-(bp[0][0] + bp[1][0]) / 2.0, -(bp[0][1] + bp[1][1]) / 2.0, -bp[0][2]])
+        pop_fname = "Objet_3D_PopOut_SnapFit_Male.stl"
+        output_files.append((pop_fname, pop_centered))
+        ext_p = pop_centered.extents
+        parts_meta.append({
+            "part_index": len(output_files),
+            "filename": pop_fname,
+            "extents_mm": [round(float(ext_p[0]), 1), round(float(ext_p[1]), 1), round(float(ext_p[2]), 2)],
+            "faces_count": int(len(pop_centered.faces)),
+        })
+
+    if req.add_inclined_stand:
+        plaque_w = float(bbox_2d[2] - bbox_2d[0])
+        plaque_h = float(bbox_2d[3] - bbox_2d[1])
+        stand_mesh = build_inclined_display_stand(
+            plaque_width_mm=plaque_w,
+            plaque_height_mm=plaque_h,
+            plaque_thickness_mm=total_height_mm,
+            angle_deg=req.stand_angle_deg,
+        )
+        stand_fname = f"Socle_Presentoir_Incline_{int(round(req.stand_angle_deg))}deg.stl"
+        output_files.append((stand_fname, stand_mesh))
+        ext_s = stand_mesh.extents
+        parts_meta.append({
+            "part_index": len(output_files),
+            "filename": stand_fname,
+            "extents_mm": [round(float(ext_s[0]), 1), round(float(ext_s[1]), 1), round(float(ext_s[2]), 2)],
+            "faces_count": int(len(stand_mesh.faces)),
+        })
+
     sess.last_preview_mesh = trimesh.util.concatenate(preview_meshes)
 
     # Generate complete pre-configured Multi-Plate & Multi-Color .3MF Project
@@ -4427,6 +4725,18 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
         recipe_lines.append(
             f"  [{s.cfs_slot}] Couleur #{s.layer_index} ({s.hex_color.upper()}) : "
             f"Couches {s.start_layer_num} à {s.end_layer_num}  ({s.start_mm:.2f} mm -> {s.end_mm:.2f} mm)"
+        )
+    if req.popout_mode != "none":
+        pop_start_z = round(total_height_mm + req.layer_height_mm, 2)
+        recipe_lines.extend([
+            "",
+            "--- 🚀 EXTENSION 3D POP-OUT & DIORAMA HYBRIDE ---",
+            f"  - Mode Pop-Out actif : {req.popout_mode} ({req.popout_assembly})",
+            f"  - Changement de bobine pour l'Objet 3D Pop-Out ({req.popout_hex_color.upper()}) à Z = {pop_start_z:.2f} mm (au-dessus du tableau HueForge) !",
+        ])
+    if req.add_inclined_stand:
+        recipe_lines.append(
+            f"  - Socle Présentoir Triangulaire Incliné ({int(round(req.stand_angle_deg))}°) inclus dans le pack .ZIP/.3MF."
         )
     if seams:
         recipe_lines.extend([
@@ -4465,6 +4775,18 @@ async def generate_hueforge_stl_and_zip(session_id: str, req: HueForgeGenerateRe
         return_dual_studio=True,
         art_style=req.art_style,
         art_intensity=req.art_intensity,
+        popout_mode=req.popout_mode,
+        popout_preset_stl=req.popout_preset_stl,
+        custom_popout_mesh=sess.custom_popout_mesh,
+        popout_scale_pct=req.popout_scale_pct,
+        popout_pitch_deg=req.popout_pitch_deg,
+        popout_yaw_deg=req.popout_yaw_deg,
+        popout_roll_deg=req.popout_roll_deg,
+        popout_offset_x_pct=req.popout_offset_x_pct,
+        popout_offset_y_pct=req.popout_offset_y_pct,
+        popout_sink_pct=req.popout_sink_pct,
+        popout_puff_height_mm=req.popout_puff_height_mm,
+        popout_hex_color=req.popout_hex_color,
     )
     shape_overlay_b64 = render_shape_overlay_base64(
         tiles=tiles,
@@ -4528,6 +4850,31 @@ async def download_hueforge_zip(session_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{base}_HueForge_Pro_CFS_Pack.zip"'},
     )
+
+
+@router.post("/{session_id}/upload-popout-stl")
+async def upload_hueforge_popout_stl(session_id: str, file: UploadFile = File(...)):
+    """
+    Uploads a custom 3D `.STL` mesh into the active HueForge session so it can burst out of the HueForge painting!
+    """
+    sess = _get_hf_session(session_id)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier STL vide.")
+    try:
+        mesh = load_and_repair_stl(raw, file.filename or "popout.stl")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"STL invalide: {exc}") from exc
+
+    sess.custom_popout_mesh = mesh
+    sess.custom_popout_filename = file.filename or "Objet_PopOut.stl"
+    ext = mesh.extents
+    return {
+        "session_id": session_id,
+        "popout_filename": sess.custom_popout_filename,
+        "faces": int(len(mesh.faces)),
+        "extents_mm": [round(float(ext[0]), 1), round(float(ext[1]), 1), round(float(ext[2]), 1)],
+    }
 
 
 def _get_hf_session(session_id: str) -> HueForgeSession:

@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Installation de StudioForge 3D v1.2.0
+title Installation de StudioForge 3D v1.3.0
 echo ============================================================================
 echo    INSTALLATION AUTOMATIQUE DE STUDIOFORGE 3D (PC CLIENT / FAMILLE)
 echo ============================================================================

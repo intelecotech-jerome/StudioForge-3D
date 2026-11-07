@@ -163,7 +163,7 @@ export default function SpoolManager({
       none: [],
       base_20: ['hueforge', 'lithophane'],
       base_plus_cut: ['hueforge', 'lithophane', 'smartcut'],
-      full_creator: ['hueforge', 'lithophane', 'smartcut', 'puzzles'],
+      full_creator: ['hueforge', 'lithophane', 'smartcut', 'puzzles', 'wirepress'],
     };
     const mods = presets[presetName] || [];
     try {
@@ -654,7 +654,7 @@ export default function SpoolManager({
                 <div className="panel-header-flex">
                   <div className="panel-title">🔑 ACTIVATION DE LICENCE &amp; MODULES ADDITIFS</div>
                   <span className="dim-badge" style={{ color: '#00f0ff' }}>
-                    {localLicense?.unlocked_modules?.length || 0} / 4 modules actifs
+                    {localLicense?.unlocked_modules?.length || 0} / 5 modules actifs
                   </span>
                 </div>
                 <p style={{ fontSize: '0.76rem', color: '#94a3b8', marginBottom: '10px' }}>
@@ -852,10 +852,28 @@ export default function SpoolManager({
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
                     {[
                       {
+                        id: 'pack_fille_3',
+                        label: '💝 Pack Fille / Créatif (3 Modules)',
+                        sub: 'HueForge Studio + Lumina 3D + WirePress 3D',
+                        mods: ['hueforge', 'lithophane', 'wirepress'],
+                      },
+                      {
                         id: 'base_20',
                         label: '📦 Pack Base (20 €)',
                         sub: 'HueForge Studio + Lumina 3D',
                         mods: ['hueforge', 'lithophane'],
+                      },
+                      {
+                        id: 'addon_wirepress_5',
+                        label: '👕 Extension WirePress (+5 €)',
+                        sub: 'Ajoute WirePress 3D (Textile)',
+                        mods: ['wirepress'],
+                      },
+                      {
+                        id: 'addon_makerlab_5',
+                        label: '🛠️ Extension MakerLab 3D (+5 €)',
+                        sub: 'Ajoute les 8 Outils MakerLab 3D',
+                        mods: ['makerlab'],
                       },
                       {
                         id: 'addon_smartcut_5',
@@ -864,16 +882,10 @@ export default function SpoolManager({
                         mods: ['smartcut'],
                       },
                       {
-                        id: 'addon_puzzles_5',
-                        label: '🧩 Extension Puzzles (+5 €)',
-                        sub: 'Ajoute Puzzle & Cryptex 3D',
-                        mods: ['puzzles'],
-                      },
-                      {
                         id: 'full_pack',
-                        label: '👑 Pack Intégral (30 €)',
-                        sub: 'Débloque tous les modules',
-                        mods: ['hueforge', 'lithophane', 'smartcut', 'puzzles'],
+                        label: '👑 Pack Intégral (Tous Modules)',
+                        sub: 'HueForge + Lumina + WirePress + MakerLab + SmartCut',
+                        mods: ['hueforge', 'lithophane', 'wirepress', 'makerlab', 'smartcut', 'puzzles'],
                       },
                     ].map((pk) => {
                       const active = adminPresetPack === pk.id;

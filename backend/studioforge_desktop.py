@@ -70,7 +70,7 @@ if __name__ == "__main__":
     _ensure_desktop_shortcut()
     url = "http://127.0.0.1:8000"
     print("==================================================================")
-    print("  STUDIOFORGE 3D v1.2.0 - APPLICATION DESKTOP AUTONOME (.EXE)")
+    print("  STUDIOFORGE 3D v1.3.0 - APPLICATION DESKTOP AUTONOME (.EXE)")
     print(f"  Ouverture de l'interface sur {url} ...")
     print("  (Un raccourci 'StudioForge 3D' a ete ajoute sur votre Bureau)")
     print("  (Gardez cette fenetre reduite pendant votre session de travail)")

@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/api/license", tags=["License & Updates"])
 
 APP_NAME = "StudioForge 3D"
-APP_VERSION = "1.2.0"
-APP_RELEASE_DATE = "2026-11-05"
+APP_VERSION = "1.3.0"
+APP_RELEASE_DATE = "2026-11-07"
 
 # ---------------------------------------------------------------------------
 # RSA-512 Public Key for Offline Signature with Message Recovery
@@ -58,6 +58,8 @@ MODULE_BITS: Dict[str, int] = {
     "lithophane": 1 << 1,  # 💡 Lumina 3D
     "smartcut": 1 << 2,    # ✂️ SmartCut 3D
     "puzzles": 1 << 3,     # 🧩 Puzzle & Cryptex 3D
+    "wirepress": 1 << 4,   # 👕 WirePress 3D (Transfert Textile à Chaud)
+    "makerlab": 1 << 5,    # 🛠️ MakerLab 3D (8 Outils Créatifs)
 }
 
 MODULE_CATALOG: List[Dict[str, Any]] = [
@@ -65,26 +67,52 @@ MODULE_CATALOG: List[Dict[str, Any]] = [
         "id": "hueforge",
         "name": "HueForge Studio",
         "icon": "🎨",
-        "tagline": "Peinture par couches de filaments (2 à 8 couleurs CFS) & cadres muraux",
+        "tagline": "Peinture par couches de filaments (2 à 8 couleurs CFS), Puzzle & Pop-Out 3D",
         "price_label": "Inclus Pack Base (20 €)",
         "addon_price_eur": 20,
         "highlights": [
             "Moteurs Rampe Manga HSV & Solveur Optique CIELAB ΔE",
-            "Tour de couches stratigraphique interactive & Loupe de couche",
-            "6 styles artistiques 3D & export direct .3MF multi-couleurs / .STL",
+            "Extension 3D Pop-Out (.STL ou Sujet 2D Gonflé 3D) & Socle Incliné",
+            "6 styles artistiques 3D, Puzzle 3D & export direct .3MF / .STL",
         ],
     },
     {
         "id": "lithophane",
         "name": "Lumina 3D",
         "icon": "💡",
-        "tagline": "Lithophanies plates, cylindres 360°, cubes LED & globes planétaires",
+        "tagline": "Lithophanies plates, cylindres 360°, cubes LED, puzzles & globes planétaires",
         "price_label": "Inclus Pack Base (20 €)",
         "addon_price_eur": 20,
         "highlights": [
-            "Plaques multi-formes, Cylindres 360°, Caissons & Cubes Lightbox 4 faces",
+            "Plaques multi-formes, Cylindres 360°, Caissons, Cubes & Puzzles Lightbox",
             "Globes sphériques 360° (Photo sur mesure ou 11 Planètes & Lune NASA)",
             "Simulation rétro-éclairage LED RGB & standards de socles Bambu / E14 / GU10",
+        ],
+    },
+    {
+        "id": "wirepress",
+        "name": "WirePress 3D",
+        "icon": "👕",
+        "tagline": "Structures filaires 3D & Grille Cell à presser à chaud sur T-Shirt & Pull",
+        "price_label": "Extension +5 €",
+        "addon_price_eur": 5,
+        "highlights": [
+            "Conversion Photo/Portrait/Logo ➔ Structure Filaire 3D & Grille Tramée Cell",
+            "Simulateur d'essayage textile en direct (T-Shirt, Hoodie, Tote Bag & Bobines Stock)",
+            "Calibrage pressage à chaud (PLA+ / TPU) & ponts anti-îlots automatiques",
+        ],
+    },
+    {
+        "id": "makerlab",
+        "name": "MakerLab 3D",
+        "icon": "🛠️",
+        "tagline": "8 générateurs créatifs : Emporte-pièce, Boîte 3D, Flexi, Bas-Relief & IA 3D",
+        "price_label": "Extension +5 € (Bêta)",
+        "addon_price_eur": 5,
+        "highlights": [
+            "Emporte-Pièces & Tampons, Boîtes 3D, Flexi Articulés & Mandala Multi-Couches",
+            "Conversion .STL ➔ Bas-Relief encadré & Sculpture IA Photo/Texte ➔ 3D (Style Meshy)",
+            "Illusion Lenticulaire 2-Angles & Morphing 3D Dual-90°",
         ],
     },
     {
@@ -248,6 +276,14 @@ def _load_license_state() -> Dict[str, Any]:
         try:
             data = json.loads(LICENSE_STATE_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
+                if _is_admin_machine():
+                    changed = False
+                    for req_m in ("wirepress", "makerlab"):
+                        if req_m not in data.get("unlocked_modules", []):
+                            data.setdefault("unlocked_modules", []).append(req_m)
+                            changed = True
+                    if changed:
+                        _save_license_state(data)
                 return data
         except Exception:
             pass
@@ -257,7 +293,7 @@ def _load_license_state() -> Dict[str, Any]:
     if _is_admin_machine():
         default_state = {
             "holder": "Créateur / Administrateur StudioForge 3D",
-            "unlocked_modules": ["hueforge", "lithophane", "smartcut", "puzzles"],
+            "unlocked_modules": ["hueforge", "lithophane", "wirepress", "makerlab", "smartcut", "puzzles"],
             "activated_keys": [],
             "client_simulation_mode": None,  # Optional override to preview what a client sees
         }

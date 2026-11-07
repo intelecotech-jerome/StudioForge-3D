@@ -25,6 +25,7 @@ const LAYOUT_OPTIONS = [
     items: [
       { value: 'multi_4_squares', label: '⊞ Grille 4 Carrés (2×2)', unitLabel: "Côté d'un Carré (mm) — ex: 200mm = 400×400", defaultSize: 200 },
       { value: 'multi_grid_squares', label: '🧩 Grille sur mesure N × M Carrés (Horizontal / Vertical)', unitLabel: "Côté d'un Carré (mm)", defaultSize: 200 },
+      { value: 'multi_puzzle', label: '🧩 Puzzle 3D Imbriqué N × M Pièces (Tenons & Mortaises Jigsaw)', unitLabel: "Côté d'une Pièce de Puzzle (mm)", defaultSize: 120 },
       { value: 'multi_7_hexagons', label: '❖ Rosace 7 Hexagones (1 Central + 6 Autour)', unitLabel: "Taille d'un Côté d'Hexagone (mm)", defaultSize: 105 },
       { value: 'multi_6_triangles', label: '✡️ Rosace 6 Triangles (Formant un Grand Hexagone)', unitLabel: "Taille d'un Côté de Triangle (mm)", defaultSize: 180 },
       { value: 'multi_4_triangles', label: '▲ Pyramide 4 Triangles (Formant un Grand Triangle 2×)', unitLabel: "Taille d'un Côté de Triangle (mm)", defaultSize: 180 },
@@ -73,7 +74,7 @@ const ART_STYLE_OPTIONS = [
 
 function computeLayoutAspect(mode, cols, rows, imgAspect) {
   if (mode === 'single_original') return imgAspect || 1.0;
-  if (mode === 'multi_grid_squares') {
+  if (mode === 'multi_grid_squares' || mode === 'multi_puzzle') {
     const c = Math.max(1, Number(cols) || 2);
     const r = Math.max(1, Number(rows) || 2);
     return c / r;
@@ -240,6 +241,24 @@ export default function HueForgeStudio({
   const [verticalExaggeration, setVerticalExaggeration] = useState(2.5);
   const [addBackConnectors, setAddBackConnectors] = useState(true);
 
+  // 3D Pop-Out & Diorama Hybrid Controls (Millennium Falcon / Jolteon VMAX / Inclined Stand)
+  const popoutStlInputRef = useRef(null);
+  const [popoutMode, setPopoutMode] = useState('none'); // 'none' | 'stl_popout' | 'image_puff_3d'
+  const [popoutPresetStl, setPopoutPresetStl] = useState('starship_falcon'); // 'starship_falcon' | 'dragon_head' | 'pokeball_emblem' | 'custom_stl'
+  const [customPopoutFilename, setCustomPopoutFilename] = useState(null);
+  const [popoutAssembly, setPopoutAssembly] = useState('monobloc_fusion'); // 'monobloc_fusion' | 'snap_fit_socket'
+  const [popoutScalePct, setPopoutScalePct] = useState(62);
+  const [popoutPitchDeg, setPopoutPitchDeg] = useState(32);
+  const [popoutYawDeg, setPopoutYawDeg] = useState(0);
+  const [popoutRollDeg, setPopoutRollDeg] = useState(-12);
+  const [popoutOffsetXPct, setPopoutOffsetXPct] = useState(0);
+  const [popoutOffsetYPct, setPopoutOffsetYPct] = useState(0);
+  const [popoutSinkPct, setPopoutSinkPct] = useState(28);
+  const [popoutPuffHeightMm, setPopoutPuffHeightMm] = useState(8.5);
+  const [popoutHexColor, setPopoutHexColor] = useState('#94a3b8');
+  const [addInclinedStand, setAddInclinedStand] = useState(false);
+  const [standAngleDeg, setStandAngleDeg] = useState(45);
+
   // Generated 3D Output
   const [genResult, setGenResult] = useState(null);
   const [stlVersion, setStlVersion] = useState(0);
@@ -339,7 +358,7 @@ export default function HueForgeStudio({
     setGridCols(c);
     setGridRows(r);
     const nextZoom = autoOptimalZoom
-      ? computeOptimalZoomClient(imageSizePx, 'multi_grid_squares', c, r)
+      ? computeOptimalZoomClient(imageSizePx, layoutMode, c, r)
       : zoom;
     if (autoOptimalZoom) {
       setZoom(nextZoom);
@@ -348,7 +367,7 @@ export default function HueForgeStudio({
     }
     if (hfSessionId) {
       refreshPalettePreview({
-        layoutMode: 'multi_grid_squares',
+        layoutMode,
         gridCols: c,
         gridRows: r,
         zoom: nextZoom,
@@ -498,6 +517,20 @@ export default function HueForgeStudio({
           border_width_mm: overrides.borderWidthMm ?? borderWidthMm,
           add_back_connectors: addBackConnectors,
           highlight_layer_idx: targetHighlight,
+          popout_mode: overrides.popoutMode ?? popoutMode,
+          popout_preset_stl: overrides.popoutPresetStl ?? popoutPresetStl,
+          popout_assembly: overrides.popoutAssembly ?? popoutAssembly,
+          popout_scale_pct: overrides.popoutScalePct ?? popoutScalePct,
+          popout_pitch_deg: overrides.popoutPitchDeg ?? popoutPitchDeg,
+          popout_yaw_deg: overrides.popoutYawDeg ?? popoutYawDeg,
+          popout_roll_deg: overrides.popoutRollDeg ?? popoutRollDeg,
+          popout_offset_x_pct: overrides.popoutOffsetXPct ?? popoutOffsetXPct,
+          popout_offset_y_pct: overrides.popoutOffsetYPct ?? popoutOffsetYPct,
+          popout_sink_pct: overrides.popoutSinkPct ?? popoutSinkPct,
+          popout_puff_height_mm: overrides.popoutPuffHeightMm ?? popoutPuffHeightMm,
+          popout_hex_color: overrides.popoutHexColor ?? popoutHexColor,
+          add_inclined_stand: overrides.addInclinedStand ?? addInclinedStand,
+          stand_angle_deg: overrides.standAngleDeg ?? standAngleDeg,
         }),
       });
       const data = await res.json();
@@ -1072,11 +1105,28 @@ export default function HueForgeStudio({
           border_width_mm: borderWidthMm,
           add_back_connectors: addBackConnectors,
           grid_resolution: gridResolution,
+          popout_mode: popoutMode,
+          popout_preset_stl: popoutPresetStl,
+          popout_assembly: popoutAssembly,
+          popout_scale_pct: popoutScalePct,
+          popout_pitch_deg: popoutPitchDeg,
+          popout_yaw_deg: popoutYawDeg,
+          popout_roll_deg: popoutRollDeg,
+          popout_offset_x_pct: popoutOffsetXPct,
+          popout_offset_y_pct: popoutOffsetYPct,
+          popout_sink_pct: popoutSinkPct,
+          popout_puff_height_mm: popoutPuffHeightMm,
+          popout_hex_color: popoutHexColor,
+          add_inclined_stand: addInclinedStand,
+          stand_angle_deg: standAngleDeg,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Erreur génération HueForge 3D');
       setGenResult(data);
+      if (popoutMode !== 'none') {
+        setViewMode('mesh_3d');
+      }
       const merged = data.active_palette.map((layer, idx) => ({
         ...layer,
         spool_id: activePalette[idx]?.spool_id || null,
@@ -2116,8 +2166,8 @@ export default function HueForgeStudio({
               ))}
             </select>
 
-            {/* Custom N x M Grid Controls when multi_grid_squares is selected */}
-            {layoutMode === 'multi_grid_squares' && (
+            {/* Custom N x M Grid Controls when multi_grid_squares or multi_puzzle is selected */}
+            {(layoutMode === 'multi_grid_squares' || layoutMode === 'multi_puzzle') && (
               <div
                 style={{
                   marginTop: '8px',
@@ -2130,7 +2180,7 @@ export default function HueForgeStudio({
               >
                 <div className="panel-header-flex" style={{ marginBottom: '6px' }}>
                   <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#00f0ff' }}>
-                    🧩 GRILLE SUR MESURE : {gridCols} LARGE × {gridRows} HAUT ({gridCols * gridRows} FRAMES)
+                    🧩 {layoutMode === 'multi_puzzle' ? 'PUZZLE 3D IMBRIQUÉ' : 'GRILLE SUR MESURE'} : {gridCols} LARGE × {gridRows} HAUT ({gridCols * gridRows} PIÈCES)
                   </span>
                   <span className="dim-badge" style={{ fontSize: '0.68rem' }}>
                     Total : {Math.round(gridCols * sizeMm)} × {Math.round(gridRows * sizeMm)} mm
@@ -2347,6 +2397,321 @@ export default function HueForgeStudio({
                 </span>
               </label>
             )}
+
+            {/* 🚀 EXTENSION HUEFORGE 3D POP-OUT & DIORAMA HYBRIDE */}
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 11px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.85))',
+                border: popoutMode !== 'none' || addInclinedStand ? '1px solid #f59e0b' : '1px solid rgba(148, 163, 184, 0.25)',
+              }}
+            >
+              <div className="panel-header-flex" style={{ marginBottom: '6px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#fbbf24' }}>
+                  🚀 EXTENSION 3D POP-OUT &amp; SOCLE DIORAMA
+                </span>
+                <span className="dim-badge" style={{ fontSize: '0.64rem', color: '#fde68a', borderColor: '#f59e0b' }}>
+                  Style Faucon / Pokémon 3D
+                </span>
+              </div>
+
+              <div className="btn-row" style={{ gap: '4px', marginBottom: '7px' }}>
+                {[
+                  { id: 'none', label: '🖼️ HueForge Plat' },
+                  { id: 'stl_popout', label: '🚀 Objet .STL Pop-Out' },
+                  { id: 'image_puff_3d', label: '⚡ Sujet 2D Gonflé 3D' },
+                ].map((pm) => (
+                  <button
+                    key={pm.id}
+                    type="button"
+                    className={`btn-hud ${popoutMode === pm.id ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.66rem', padding: '5px 4px' }}
+                    onClick={() => {
+                      setPopoutMode(pm.id);
+                      refreshPalettePreview({ popoutMode: pm.id });
+                    }}
+                  >
+                    {pm.label}
+                  </button>
+                ))}
+              </div>
+
+              {popoutMode === 'stl_popout' && (
+                <div style={{ marginTop: '6px' }}>
+                  <label className="field-label">Modèle 3D jaillissant du tableau :</label>
+                  <div className="btn-row" style={{ gap: '4px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'starship_falcon', label: '🚀 Vaisseau Falcon' },
+                      { id: 'dragon_head', label: '🐉 Buste Dragon' },
+                      { id: 'pokeball_emblem', label: '⚡ Sphère TCG' },
+                    ].map((pr) => (
+                      <button
+                        key={pr.id}
+                        type="button"
+                        className={`btn-hud ${popoutPresetStl === pr.id ? 'active' : ''}`}
+                        style={{ flex: 1, fontSize: '0.65rem', padding: '4px 5px' }}
+                        onClick={() => {
+                          setPopoutPresetStl(pr.id);
+                          refreshPalettePreview({ popoutMode: 'stl_popout', popoutPresetStl: pr.id });
+                        }}
+                      >
+                        {pr.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    ref={popoutStlInputRef}
+                    type="file"
+                    accept=".stl"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f || !hfSessionId) return;
+                      e.target.value = '';
+                      setLoading(true);
+                      try {
+                        const fd = new FormData();
+                        fd.append('file', f);
+                        const res = await fetch(`${API_BASE}/api/hueforge/${hfSessionId}/upload-popout-stl`, {
+                          method: 'POST',
+                          body: fd,
+                        });
+                        const d = await res.json();
+                        if (!res.ok) throw new Error(d.detail || 'Erreur import STL Pop-Out');
+                        setCustomPopoutFilename(d.popout_filename);
+                        setPopoutPresetStl('custom_stl');
+                        refreshPalettePreview({ popoutMode: 'stl_popout', popoutPresetStl: 'custom_stl' });
+                      } catch (err) {
+                        alert(err.message);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className={`btn-cyber ${popoutPresetStl === 'custom_stl' ? 'primary-full' : 'secondary'}`}
+                    style={{ width: '100%', padding: '5px 8px', fontSize: '0.7rem', marginBottom: '7px' }}
+                    disabled={!hfSessionId || loading}
+                    onClick={() => popoutStlInputRef.current?.click()}
+                  >
+                    📂 {customPopoutFilename ? `STL actif : ${customPopoutFilename}` : 'Importer mon propre fichier .STL Pop-Out...'}
+                  </button>
+
+                  <div className="grid-2col">
+                    <div>
+                      <label className="field-label">
+                        Taille 3D : <strong className="text-cyan">{popoutScalePct}%</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="20"
+                        max="115"
+                        step="2"
+                        value={popoutScalePct}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutScalePct(val);
+                          schedulePalettePreview({ popoutScalePct: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#f59e0b' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">
+                        Enfoncement Z : <strong className="text-cyan">{popoutSinkPct}%</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="5"
+                        max="65"
+                        step="2"
+                        value={popoutSinkPct}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutSinkPct(val);
+                          schedulePalettePreview({ popoutSinkPct: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#f59e0b' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2col" style={{ marginTop: '4px' }}>
+                    <div>
+                      <label className="field-label">
+                        Cabrage (Pitch) : <strong className="text-cyan">{popoutPitchDeg}°</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="-60"
+                        max="75"
+                        step="2"
+                        value={popoutPitchDeg}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutPitchDeg(val);
+                          schedulePalettePreview({ popoutPitchDeg: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#00f0ff' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">
+                        Inclinaison (Roll) : <strong className="text-cyan">{popoutRollDeg}°</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="-60"
+                        max="60"
+                        step="2"
+                        value={popoutRollDeg}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutRollDeg(val);
+                          schedulePalettePreview({ popoutRollDeg: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#00f0ff' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2col" style={{ marginTop: '4px' }}>
+                    <div>
+                      <label className="field-label">Mode d&apos;Assemblage :</label>
+                      <select
+                        className="cyber-input"
+                        value={popoutAssembly}
+                        onChange={(e) => setPopoutAssembly(e.target.value)}
+                      >
+                        <option value="monobloc_fusion">🔗 Fusion Monobloc (Imprimé dessus)</option>
+                        <option value="snap_fit_socket">🧩 Emboîtement Snap-Fit (2 Pièces)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">Couleur Bobine 3D :</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <input
+                          type="color"
+                          value={popoutHexColor}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPopoutHexColor(val);
+                            schedulePalettePreview({ popoutHexColor: val }, 70);
+                          }}
+                          className="color-Swatch-input"
+                        />
+                        <span className="dim-badge" style={{ fontSize: '0.68rem' }}>
+                          {popoutHexColor.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {popoutMode === 'image_puff_3d' && (
+                <div style={{ marginTop: '6px' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#cbd5e1', marginBottom: '6px', lineHeight: 1.35 }}>
+                    ⚡ Détoure automatiquement le sujet central de votre carte/photo (ex: Goku, Pokémon Jolteon VMAX) et le gonfle en haut-relief 3D organique au-dessus de la plaque HueForge !
+                  </div>
+                  <div className="grid-2col">
+                    <div>
+                      <label className="field-label">
+                        Hauteur Pop-Out 3D : <strong className="text-cyan">{popoutPuffHeightMm.toFixed(1)} mm</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="3.0"
+                        max="20.0"
+                        step="0.5"
+                        value={popoutPuffHeightMm}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutPuffHeightMm(val);
+                          schedulePalettePreview({ popoutPuffHeightMm: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#f59e0b' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">
+                        Zone du Sujet : <strong className="text-cyan">{popoutScalePct}%</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="35"
+                        max="100"
+                        step="5"
+                        value={popoutScalePct}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPopoutScalePct(val);
+                          schedulePalettePreview({ popoutScalePct: val }, 70);
+                        }}
+                        style={{ width: '100%', accentColor: '#00f0ff' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {popoutMode !== 'none' && (
+                <button
+                  type="button"
+                  className="btn-cyber primary-full"
+                  disabled={!hfSessionId || loading}
+                  onClick={handleGenerateHueForge3D}
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    padding: '7px 10px',
+                    fontSize: '0.73rem',
+                    fontWeight: 700,
+                    background: 'linear-gradient(90deg, #f59e0b, #ea580c)',
+                    borderColor: '#fbbf24',
+                    color: '#fff',
+                  }}
+                >
+                  {loading
+                    ? '⏳ Sculpture 3D Pop-Out en cours...'
+                    : '🧊 Sculpter & Voir le Relief Pop-Out en 3D Maintenant'}
+                </button>
+              )}
+
+              {/* Optional Inclined Triangular Wedge Stand (Photo 2) */}
+              <div style={{ marginTop: '8px', paddingTop: '7px', borderTop: '1px solid rgba(148, 163, 184, 0.18)' }}>
+                <label className="switch-label">
+                  <input
+                    type="checkbox"
+                    checked={addInclinedStand}
+                    onChange={(e) => setAddInclinedStand(e.target.checked)}
+                  />
+                  <span>
+                    📐 Générer le Socle Présentoir Triangulaire Incliné ({standAngleDeg}° — Style Photo 2)
+                  </span>
+                </label>
+                {addInclinedStand && (
+                  <div style={{ marginTop: '4px' }}>
+                    <label className="field-label">
+                      Angle d&apos;Inclinaison du Socle : <strong className="text-cyan">{standAngleDeg}°</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min="30"
+                      max="65"
+                      step="5"
+                      value={standAngleDeg}
+                      onChange={(e) => setStandAngleDeg(parseFloat(e.target.value))}
+                      style={{ width: '100%', accentColor: '#f59e0b' }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
 
             <button
               className="btn-cyber pink-full"
@@ -2798,7 +3163,12 @@ export default function HueForgeStudio({
             <Viewer3D
               stlUrl={previewStlUrl}
               colorLayers={activePalette}
-              scaleZ={verticalExaggeration}
+              popoutConfig={{
+                mode: popoutMode,
+                hexColor: popoutHexColor,
+                puffHeightMm: popoutPuffHeightMm,
+              }}
+              scaleZ={popoutMode !== 'none' ? 1.0 : verticalExaggeration}
               modelStats={
                 genResult
                   ? {

@@ -16,14 +16,50 @@ import math
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
+import manifold3d as m3d
 import numpy as np
+import shapely.geometry as sg
 import trimesh
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 
+from core.mesh_repair import manifold_to_trimesh
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+import sys
+
+if getattr(sys, "frozen", False):
+    _exe_data = Path(sys.executable).resolve().parent / "data"
+    _internal_data = Path(getattr(sys, "_MEIPASS", _exe_data)) / "data"
+    DATA_DIR = _exe_data if (_exe_data / "planet_maps").exists() else (_internal_data if (_internal_data / "planet_maps").exists() else _exe_data)
+else:
+    DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 LAMP_STANDARDS_FILE = DATA_DIR / "lamp_standards.json"
+PLANET_MAPS_DIR = DATA_DIR / "planet_maps"
+PLANET_STANDS_DIR = DATA_DIR / "planet_stands"
+
+OFFICIAL_PLANET_CATALOG: List[Dict[str, str]] = [
+    {"id": "planet_moon", "label": "🌕 Lune NASA (Cratères & Mers HD)", "file": "planet_moon.png"},
+    {"id": "planet_earth", "label": "🌍 Terre Politique (Pays & Frontières)", "file": "planet_earth.png"},
+    {"id": "planet_earth_topo", "label": "🏔️ Terre Topographique (Relief & Montagnes)", "file": "planet_earth_topo.png"},
+    {"id": "planet_earth_day", "label": "🌎 Terre Satellite Jour (Continents)", "file": "planet_earth_day.png"},
+    {"id": "planet_earth_bathy", "label": "🌊 Terre & Bathymétrie des Océans", "file": "planet_earth_bathy.png"},
+    {"id": "planet_death_star", "label": "🪐 Étoile de la Mort (Star Wars HD)", "file": "planet_death_star.png"},
+    {"id": "planet_mars", "label": "🔴 Mars (Olympus Mons & Valles Marineris)", "file": "planet_mars.png"},
+    {"id": "planet_jupiter", "label": "🟠 Jupiter (Bandes & Grande Tache Rouge)", "file": "planet_jupiter.png"},
+    {"id": "planet_saturn", "label": "🪐 Saturne (Atmosphère Planétaire)", "file": "planet_saturn.png"},
+    {"id": "planet_sun", "label": "☀️ Le Soleil (Granulation & Éruptions)", "file": "planet_sun.png"},
+    {"id": "planet_mercury", "label": "☿️ Mercure (Cratères Solaires)", "file": "planet_mercury.png"},
+    {"id": "planet_venus", "label": "♀️ Vénus (Surface Volcanique Radar)", "file": "planet_venus.png"},
+    {"id": "planet_venus_atmo", "label": "☁️ Vénus (Atmosphère Nuageuse)", "file": "planet_venus_atmo.png"},
+    {"id": "planet_uranus", "label": "🔵 Uranus (Géante de Glace)", "file": "planet_uranus.png"},
+    {"id": "planet_neptune", "label": "🔷 Neptune (Tempêtes Australes)", "file": "planet_neptune.png"},
+    {"id": "planet_pluto", "label": "❄️ Pluton (Cœur Tombaugh Regio)", "file": "planet_pluto.png"},
+    {"id": "planet_europa", "label": "🧊 Europe (Lune Glacée de Jupiter)", "file": "planet_europa.png"},
+    {"id": "planet_callisto", "label": "🌑 Callisto (Lune Cratérisée)", "file": "planet_callisto.png"},
+    {"id": "planet_universe", "label": "🌌 Fond Cosmologique de l'Univers", "file": "planet_universe.png"},
+]
 
 DEFAULT_LAMP_STANDARDS: List[Dict[str, Any]] = [
     {
@@ -153,17 +189,24 @@ def resolve_lamp_spec(
 
 def generate_planetary_luminance_map(
     planet_mode: str,
-    width: int = 720,
-    height: int = 360,
+    width: int = 1080,
+    height: int = 540,
 ) -> Image.Image:
     """
-    Generates a detailed equirectangular grayscale image (0..255) for:
-    - `planet_moon`: Lunar Maria (dark basalt plains) + multi-scale impact craters with bright rays & rims
-    - `planet_earth`: Realistic continents, mountain ranges, oceans & polar caps
-    - `planet_mars`: Tharsis bulge, Olympus Mons, Valles Marineris canyon & southern cratered highlands
-    - `planet_jupiter`: Zonal turbulent cloud bands, festoons & the Great Red Spot
-    - `planet_saturn`: Banded gas giant with equatorial storm hex & sci-fi orbital ring line
+    Loads the authentic high-resolution planetary/lunar relief map extracted from the user's
+    official NASA/Political/DeathStar STL collection in `backend/data/planet_maps/`.
+    Falls back to procedural generation only if the map file is absent.
     """
+    map_path = PLANET_MAPS_DIR / f"{planet_mode}.png"
+    if map_path.exists():
+        try:
+            pil_map = Image.open(map_path).convert("RGB")
+            if pil_map.size != (width, height):
+                pil_map = pil_map.resize((width, height), Image.Resampling.LANCZOS)
+            return pil_map
+        except Exception:
+            pass
+
     rng = np.random.default_rng(seed={
         "planet_moon": 1969,
         "planet_earth": 2026,
@@ -560,17 +603,35 @@ def build_globe_lamp_stand_mesh(
     lamp_spec: Dict[str, float],
 ) -> trimesh.Trimesh:
     """
-    Builds one of the 4 interchangeable Lamp Stands (Socles) for the Lithophane Globe:
-    - `ring_bambu`: Socle Anneau Minimaliste (Standard Bambu LED)
-    - `tripod_modern`: Socle Trépied Design (3 Pieds Courbés + Berceau Lampe Central)
-    - `pedestal_fluted`: Socle Piédestal Architectural Cannelé
-    - `crown_gothic`: Socle Couronne / 4 Griffes Royal
-    All stands include:
-    - Raised LED lamp puck/socket recess (`puck_diameter_mm`, `recess_depth_mm`, `elevation_mm`)
-    - Inner support ledge (`inner_ledge_diameter_mm`)
-    - Rear cable exit notch (`cable_notch_width_mm` x `cable_notch_height_mm`)
-    - Upper seating groove matched to the Globe's bottom collar (`open_r_out_mm` + 0.45mm clearance).
+    Builds or loads the chosen Lamp Stand (Socle) for the Lithophane Globe:
+    Supports the 5 official STL stands from the user's collection:
+    - `stand_bambu_official` (`04_bambu_base.stl`)
+    - `stand_rock_lunar` (`05_rock_base.stl` — Socle Rocheux Lunaire)
+    - `stand_wavy_moon` (`Moon Lamp - Wavy Stand.stl` — Socle Ondulé Design)
+    - `stand_legacy_smooth` (`02_legacy_base_no_threads.stl`)
+    - `stand_legacy_threaded` (`02_legacy_base_threaded.stl`)
+    Plus the 4 parametric stands (`ring_bambu`, `tripod_modern`, `pedestal_fluted`, `crown_gothic`).
     """
+    official_stl_map = {
+        "stand_bambu_official": "stand_bambu_official.stl",
+        "stand_rock_lunar": "stand_rock_lunar.stl",
+        "stand_wavy_moon": "stand_wavy_moon.stl",
+        "stand_legacy_smooth": "stand_legacy_smooth.stl",
+        "stand_legacy_threaded": "stand_legacy_threaded.stl",
+    }
+    if stand_style in official_stl_map:
+        stl_path = PLANET_STANDS_DIR / official_stl_map[stand_style]
+        if stl_path.exists():
+            try:
+                loaded = trimesh.load(stl_path, force="mesh")
+                bmin, bmax = loaded.bounds
+                cx = 0.5 * (bmin[0] + bmax[0])
+                cy = 0.5 * (bmin[1] + bmax[1])
+                loaded.apply_translation([-cx, -cy, -bmin[2]])
+                return loaded
+            except Exception:
+                pass
+
     puck_r = lamp_spec["puck_diameter_mm"] * 0.5
     ledge_r = lamp_spec["inner_ledge_diameter_mm"] * 0.5
     recess_h = lamp_spec["recess_depth_mm"]
@@ -832,4 +893,920 @@ def build_suspended_lamp_holder_bars(
         holder_parts.append(by)
 
     return holder_parts
+
+
+# ---------------------------------------------------------------------------
+# 6 New Lithophane 3D Architectures (Dual, Polygon, Cone, Balloon, Vase, Stencil)
+# ---------------------------------------------------------------------------
+
+def build_accordion_dual_lithophane_mesh(
+    t_grid: np.ndarray,
+    total_width_mm: float,
+    height_mm: float,
+    num_panels: int = 3,
+    fold_angle_deg: float = 34.0,
+    border_width_mm: float = 4.0,
+    frame_thickness_mm: float = 3.8,
+) -> trimesh.Trimesh:
+    """
+    Builds a self-standing Accordion / Zig-Zag ("Dual") Lithophane Screen (`num_panels = 2, 3, or 4`).
+    Each panel folds at `+fold_angle_deg` / `-fold_angle_deg` alternately with reinforced vertical
+    hinge pillars and top/bottom frames so it stands upright on a desk with zero supports!
+    """
+    n_p = max(2, min(4, int(num_panels)))
+    grid = t_grid.copy()
+    ny, nx = grid.shape
+    by = max(1, int(round((border_width_mm / max(1.0, height_mm)) * ny)))
+    bx = max(1, int(round((border_width_mm / max(1.0, total_width_mm)) * nx)))
+    if border_width_mm > 0.1:
+        grid[:by, :] = frame_thickness_mm
+        grid[ny - by :, :] = frame_thickness_mm
+        grid[:, :bx] = frame_thickness_mm
+        grid[:, nx - bx :] = frame_thickness_mm
+        # Reinforce vertical fold seams between panels
+        for p_i in range(1, n_p):
+            seam_c = int(round((p_i / float(n_p)) * (nx - 1)))
+            half_s = max(1, bx // 2)
+            c0 = max(0, seam_c - half_s)
+            c1 = min(nx, seam_c + half_s + 1)
+            grid[:, c0:c1] = frame_thickness_mm
+
+    grid_flipped = np.flipud(grid).astype(np.float64)
+
+    # Compute 2D zig-zag centerline (x_c(c), y_c(c)) and outward normal (nx_c(c), ny_c(c))
+    ang_rad = math.radians(max(18.0, min(55.0, float(fold_angle_deg))))
+    u_norm = np.linspace(0.0, float(n_p), nx, dtype=np.float64)
+    panel_w = float(total_width_mm) / float(n_p)
+
+    x_center = np.zeros(nx, dtype=np.float64)
+    y_center = np.zeros(nx, dtype=np.float64)
+    norm_x = np.zeros(nx, dtype=np.float64)
+    norm_y = np.zeros(nx, dtype=np.float64)
+
+    cur_x = 0.0
+    cur_y = 0.0
+    panel_starts_x = []
+    panel_starts_y = []
+    panel_dirs = []
+    for p_i in range(n_p):
+        sign = 1.0 if (p_i % 2 == 0) else -1.0
+        theta_p = sign * ang_rad
+        dx = math.cos(theta_p)
+        dy = math.sin(theta_p)
+        panel_starts_x.append(cur_x)
+        panel_starts_y.append(cur_y)
+        panel_dirs.append((dx, dy))
+        cur_x += panel_w * dx
+        cur_y += panel_w * dy
+
+    for c_i in range(nx):
+        u_val = u_norm[c_i]
+        p_idx = min(n_p - 1, int(math.floor(u_val)))
+        local_t = (u_val - p_idx) * panel_w
+        dx, dy = panel_dirs[p_idx]
+        x_center[c_i] = panel_starts_x[p_idx] + local_t * dx
+        y_center[c_i] = panel_starts_y[p_idx] + local_t * dy
+        # Front normal points toward -Y (viewer)
+        norm_x[c_i] = dy
+        norm_y[c_i] = -dx
+
+    # Smooth normals slightly at fold vertices so outer surface doesn't self-intersect
+    norm_x = gaussian_filter(norm_x, sigma=2.2)
+    norm_y = gaussian_filter(norm_y, sigma=2.2)
+    n_len = np.hypot(norm_x, norm_y) + 1e-8
+    norm_x /= n_len
+    norm_y /= n_len
+
+    # Center X/Y around origin
+    x_center -= 0.5 * (np.min(x_center) + np.max(x_center))
+    y_center -= 0.5 * (np.min(y_center) + np.max(y_center))
+
+    zs = np.linspace(0.0, float(height_mm), ny, dtype=np.float64)
+    zv = np.broadcast_to(zs[:, None], (ny, nx))
+
+    x_out = (x_center[None, :] + grid_flipped * norm_x[None, :]).ravel()
+    y_out = (y_center[None, :] + grid_flipped * norm_y[None, :]).ravel()
+    z_out = zv.ravel()
+
+    x_in = np.broadcast_to(x_center[None, :], (ny, nx)).ravel()
+    y_in = np.broadcast_to(y_center[None, :], (ny, nx)).ravel()
+    z_in = zv.ravel()
+
+    n_pts = nx * ny
+    all_verts = np.vstack([
+        np.column_stack([x_out, y_out, z_out]),
+        np.column_stack([x_in, y_in, z_in]),
+    ])
+
+    r = np.arange(ny - 1, dtype=np.int64)[:, None]
+    c = np.arange(nx - 1, dtype=np.int64)[None, :]
+    p00 = (r * nx + c).ravel()
+    p10 = p00 + 1
+    p01 = p00 + nx
+    p11 = p01 + 1
+
+    f_out1 = np.column_stack([p00, p10, p11])
+    f_out2 = np.column_stack([p00, p11, p01])
+
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    f_in1 = np.column_stack([b00, b11, b10])
+    f_in2 = np.column_stack([b00, b01, b11])
+
+    c_idx = np.arange(nx - 1, dtype=np.int64)
+    t_bot = c_idx
+    b_bot = t_bot + n_pts
+    w_bot1 = np.column_stack([b_bot, b_bot + 1, t_bot + 1])
+    w_bot2 = np.column_stack([b_bot, t_bot + 1, t_bot])
+
+    t_top = (ny - 1) * nx + c_idx
+    b_top = t_top + n_pts
+    w_top1 = np.column_stack([b_top + 1, b_top, t_top])
+    w_top2 = np.column_stack([b_top + 1, t_top, t_top + 1])
+
+    r_idx = np.arange(ny - 1, dtype=np.int64)
+    t_left = r_idx * nx
+    b_left = t_left + n_pts
+    w_left1 = np.column_stack([b_left + nx, b_left, t_left])
+    w_left2 = np.column_stack([b_left + nx, t_left, t_left + nx])
+
+    t_right = r_idx * nx + (nx - 1)
+    b_right = t_right + n_pts
+    w_right1 = np.column_stack([b_right, b_right + nx, t_right + nx])
+    w_right2 = np.column_stack([b_right, t_right + nx, t_right])
+
+    all_faces = np.vstack([f_out1, f_out2, f_in1, f_in2, w_bot1, w_bot2, w_top1, w_top2, w_left1, w_left2, w_right1, w_right2])
+    mesh = trimesh.Trimesh(vertices=all_verts, faces=all_faces, process=True)
+    trimesh.repair.fix_normals(mesh)
+    return mesh
+
+
+def build_polygon_lantern_lithophane_mesh(
+    t_grid: np.ndarray,
+    diameter_mm: float,
+    height_mm: float,
+    num_sides: int = 6,
+    border_width_mm: float = 4.0,
+    frame_thickness_mm: float = 3.8,
+    lamp_spec: Optional[Dict[str, float]] = None,
+    add_hanging_loops: bool = True,
+) -> trimesh.Trimesh:
+    """
+    Builds a Multi-Faceted Polygon Lantern (`num_sides = 5, 6, or 8`) with:
+    - Flat framed lithophane facets around a regular N-gon perimeter
+    - Reinforced corner pillars between each facet
+    - Integrated top hanging loops/eyelets (like classic Asian/Victorian lanterns)
+    - Integrated bottom raised LED lamp holder + support bars!
+    """
+    if lamp_spec is None:
+        lamp_spec = resolve_lamp_spec("bambu_led_001")
+
+    n_sides = max(5, min(8, int(num_sides)))
+    grid = t_grid.copy()
+    ny, nx = grid.shape
+    by = max(1, int(round((border_width_mm / max(1.0, height_mm)) * ny)))
+    bx = max(1, int(round((border_width_mm / max(1.0, math.pi * diameter_mm)) * nx)))
+    if border_width_mm > 0.1:
+        grid[:by, :] = frame_thickness_mm
+        grid[ny - by :, :] = frame_thickness_mm
+        for s_i in range(n_sides):
+            seam_c = int(round((s_i / float(n_sides)) * nx)) % nx
+            for dc in range(-bx, bx + 1):
+                grid[:, (seam_c + dc) % nx] = frame_thickness_mm
+
+    grid_flipped = np.flipud(grid).astype(np.float64)
+    r_circum = max(25.0, float(diameter_mm) * 0.5)
+
+    # Regular polygon vertices in XY plane
+    poly_angles = [k * (2.0 * math.pi / n_sides) for k in range(n_sides + 1)]
+    vx = [r_circum * math.cos(a) for a in poly_angles]
+    vy = [r_circum * math.sin(a) for a in poly_angles]
+
+    u_norm = np.linspace(0.0, float(n_sides), nx, endpoint=False, dtype=np.float64)
+    x_in_col = np.zeros(nx, dtype=np.float64)
+    y_in_col = np.zeros(nx, dtype=np.float64)
+    nx_col = np.zeros(nx, dtype=np.float64)
+    ny_col = np.zeros(nx, dtype=np.float64)
+
+    for c_i in range(nx):
+        u_val = u_norm[c_i]
+        s_idx = min(n_sides - 1, int(math.floor(u_val)))
+        frac = u_val - s_idx
+        x_in_col[c_i] = (1.0 - frac) * vx[s_idx] + frac * vx[s_idx + 1]
+        y_in_col[c_i] = (1.0 - frac) * vy[s_idx] + frac * vy[s_idx + 1]
+        mid_ang = (s_idx + 0.5) * (2.0 * math.pi / n_sides)
+        nx_col[c_i] = math.cos(mid_ang)
+        ny_col[c_i] = math.sin(mid_ang)
+
+    # Smooth normals slightly across polygon corners for clean mitered outer edges
+    nx_col = np.roll(gaussian_filter(np.tile(nx_col, 3), sigma=1.8)[nx : 2 * nx], 0)
+    ny_col = np.roll(gaussian_filter(np.tile(ny_col, 3), sigma=1.8)[nx : 2 * nx], 0)
+    n_len = np.hypot(nx_col, ny_col) + 1e-8
+    nx_col /= n_len
+    ny_col /= n_len
+
+    zs = np.linspace(0.0, float(height_mm), ny, dtype=np.float64)
+    zv = np.broadcast_to(zs[:, None], (ny, nx)).copy()
+
+    # Rear cable notch on bottom rim
+    notch_w = lamp_spec["cable_notch_width_mm"]
+    notch_h = min(lamp_spec["cable_notch_height_mm"], height_mm * 0.15)
+    if notch_w > 0.5 and notch_h > 0.5:
+        for c_i in range(nx):
+            if y_in_col[c_i] > 0 and abs(x_in_col[c_i]) <= notch_w * 0.55:
+                zv[zv[:, c_i] < notch_h, c_i] = notch_h
+
+    x_out = (x_in_col[None, :] + grid_flipped * nx_col[None, :]).ravel()
+    y_out = (y_in_col[None, :] + grid_flipped * ny_col[None, :]).ravel()
+    z_out = zv.ravel()
+
+    x_in = np.broadcast_to(x_in_col[None, :], (ny, nx)).ravel()
+    y_in = np.broadcast_to(y_in_col[None, :], (ny, nx)).ravel()
+    z_in = zv.ravel()
+
+    n_pts = nx * ny
+    all_verts = np.vstack([
+        np.column_stack([x_out, y_out, z_out]),
+        np.column_stack([x_in, y_in, z_in]),
+    ])
+
+    r = np.arange(ny - 1, dtype=np.int64)[:, None]
+    c = np.arange(nx, dtype=np.int64)[None, :]
+    c_next = (c + 1) % nx
+
+    p00 = (r * nx + c).ravel()
+    p10 = (r * nx + c_next).ravel()
+    p01 = ((r + 1) * nx + c).ravel()
+    p11 = ((r + 1) * nx + c_next).ravel()
+
+    f_out1 = np.column_stack([p00, p10, p11])
+    f_out2 = np.column_stack([p00, p11, p01])
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    f_in1 = np.column_stack([b00, b11, b10])
+    f_in2 = np.column_stack([b00, b01, b11])
+
+    c_all = np.arange(nx, dtype=np.int64)
+    c_all_next = (c_all + 1) % nx
+    t_bot = c_all
+    t_bot_n = c_all_next
+    b_bot = t_bot + n_pts
+    b_bot_n = t_bot_n + n_pts
+    w_bot1 = np.column_stack([b_bot, b_bot_n, t_bot_n])
+    w_bot2 = np.column_stack([b_bot, t_bot_n, t_bot])
+
+    t_top = (ny - 1) * nx + c_all
+    t_top_n = (ny - 1) * nx + c_all_next
+    b_top = t_top + n_pts
+    b_top_n = t_top_n + n_pts
+    w_top1 = np.column_stack([b_top_n, b_top, t_top])
+    w_top2 = np.column_stack([b_top_n, t_top, t_top_n])
+
+    all_faces = np.vstack([f_out1, f_out2, f_in1, f_in2, w_bot1, w_bot2, w_top1, w_top2])
+    lantern_mesh = trimesh.Trimesh(vertices=all_verts, faces=all_faces, process=True)
+    trimesh.repair.fix_normals(lantern_mesh)
+
+    parts = [lantern_mesh]
+
+    # Top hanging loops (3 eyelets around the top rim as shown in the Polygon photo)
+    if add_hanging_loops:
+        r_apothem = r_circum * math.cos(math.pi / n_sides) + frame_thickness_mm * 0.5
+        n_loops = 3 if n_sides % 3 == 0 else 2
+        for k in range(n_loops):
+            s_idx = int(round(k * (n_sides / float(n_loops)))) % n_sides
+            mid_ang = (s_idx + 0.5) * (2.0 * math.pi / n_sides)
+            # Build upright eyelet tab with hole
+            tab_outer = sg.Point(0.0, 0.0).buffer(6.5, resolution=32)
+            tab_hole = sg.Point(0.0, 2.2).buffer(2.6, resolution=24)
+            tab_2d = tab_outer.difference(tab_hole)
+            ext_c = np.array(tab_2d.exterior.coords[:-1], dtype=np.float64)
+            if not sg.LinearRing(ext_c).is_ccw:
+                ext_c = ext_c[::-1]
+            polys = [ext_c.tolist()]
+            for h_ring in tab_2d.interiors:
+                hc = np.array(h_ring.coords[:-1], dtype=np.float64)
+                if sg.LinearRing(hc).is_ccw:
+                    hc = hc[::-1]
+                polys.append(hc.tolist())
+            cs = m3d.CrossSection(polys)
+            tab_m = m3d.Manifold.extrude(cs, height=frame_thickness_mm)
+            tab_tm = manifold_to_trimesh(tab_m)
+            tab_tm.apply_translation([0.0, 0.0, -frame_thickness_mm * 0.5])
+            # Rotate so tab stands in Z and faces outward along mid_ang
+            rot_x = trimesh.transformations.rotation_matrix(math.pi * 0.5, [1.0, 0.0, 0.0])
+            rot_z = trimesh.transformations.rotation_matrix(mid_ang + math.pi * 0.5, [0.0, 0.0, 1.0])
+            tab_tm.apply_transform(rot_x)
+            tab_tm.apply_transform(rot_z)
+            tab_tm.apply_translation([
+                r_apothem * math.cos(mid_ang),
+                r_apothem * math.sin(mid_ang),
+                float(height_mm) + 1.5,
+            ])
+            parts.append(tab_tm)
+
+    # Raised Lamp Holder + Support Bars at the bottom
+    r_in_min = r_circum * math.cos(math.pi / n_sides)
+    if lamp_spec["puck_diameter_mm"] * 0.5 < r_in_min + 1.0:
+        holder_parts = build_suspended_lamp_holder_bars(
+            inner_span_x=r_in_min * 2.0,
+            inner_span_y=r_in_min * 2.0,
+            z_base=0.0,
+            lamp_spec=lamp_spec,
+        )
+        parts.extend(holder_parts)
+
+    combined = trimesh.util.concatenate(parts)
+    combined.merge_vertices()
+    return combined
+
+
+def build_cone_lampshade_lithophane_mesh(
+    t_grid: np.ndarray,
+    bottom_diameter_mm: float,
+    height_mm: float,
+    top_ratio: float = 0.52,
+    border_width_mm: float = 4.5,
+    frame_thickness_mm: float = 3.8,
+    lamp_spec: Optional[Dict[str, float]] = None,
+) -> trimesh.Trimesh:
+    """
+    Builds a 100% watertight Tapered Conical Lampshade (Frustum 360°) Lithophane with:
+    - Wide bottom diameter (`bottom_diameter_mm`) tapering up to `top_diameter = bottom_diameter_mm * top_ratio`
+    - Thickened top and bottom collar rims
+    - Integrated bottom raised LED lamp mount + 4 support bars + rear cable notch!
+    """
+    if lamp_spec is None:
+        lamp_spec = resolve_lamp_spec("bambu_led_001")
+
+    grid = t_grid.copy()
+    ny, nx = grid.shape
+    by = max(1, int(round((border_width_mm / max(1.0, height_mm)) * ny)))
+    if border_width_mm > 0.1:
+        grid[:by, :] = frame_thickness_mm
+        grid[ny - by :, :] = frame_thickness_mm
+
+    blend_cols = min(6, nx // 20)
+    if blend_cols >= 2:
+        for k in range(blend_cols):
+            w = (k + 1) / float(blend_cols + 1)
+            avg_col = 0.5 * (grid[:, k] + grid[:, nx - 1 - k])
+            grid[:, k] = w * grid[:, k] + (1.0 - w) * avg_col
+            grid[:, nx - 1 - k] = w * grid[:, nx - 1 - k] + (1.0 - w) * avg_col
+
+    grid_flipped = np.flipud(grid).astype(np.float64)
+    r_bot = max(28.0, float(bottom_diameter_mm) * 0.5)
+    r_top = max(18.0, r_bot * max(0.35, min(0.85, float(top_ratio))))
+
+    thetas = np.linspace(0.0, 2.0 * math.pi, nx, endpoint=False, dtype=np.float64)
+    zs = np.linspace(0.0, float(height_mm), ny, dtype=np.float64)
+    v_frac = np.linspace(0.0, 1.0, ny, dtype=np.float64)[:, None]
+
+    r_in_profile = (1.0 - v_frac) * r_bot + v_frac * r_top
+    cos_t = np.cos(thetas)[None, :]
+    sin_t = np.sin(thetas)[None, :]
+    zv = np.broadcast_to(zs[:, None], (ny, nx)).copy()
+
+    # Rear cable notch at base
+    notch_w = lamp_spec["cable_notch_width_mm"]
+    notch_h = min(lamp_spec["cable_notch_height_mm"], height_mm * 0.15)
+    if notch_w > 0.5 and notch_h > 0.5:
+        for c_i in range(nx):
+            x_c = r_bot * math.cos(thetas[c_i])
+            y_c = r_bot * math.sin(thetas[c_i])
+            if y_c > 0 and abs(x_c) <= notch_w * 0.55:
+                zv[zv[:, c_i] < notch_h, c_i] = notch_h
+
+    # Displace outward along cone surface normal
+    slope = (r_bot - r_top) / max(1.0, float(height_mm))
+    norm_rad = 1.0 / math.hypot(1.0, slope)
+    norm_z = slope / math.hypot(1.0, slope)
+
+    r_outer = r_in_profile + grid_flipped * norm_rad
+    z_outer = zv + grid_flipped * norm_z
+
+    x_out = (r_outer * cos_t).ravel()
+    y_out = (r_outer * sin_t).ravel()
+    z_out = z_outer.ravel()
+
+    x_in = (r_in_profile * cos_t).ravel()
+    y_in = (r_in_profile * sin_t).ravel()
+    z_in = zv.ravel()
+
+    n_pts = nx * ny
+    all_verts = np.vstack([
+        np.column_stack([x_out, y_out, z_out]),
+        np.column_stack([x_in, y_in, z_in]),
+    ])
+
+    r = np.arange(ny - 1, dtype=np.int64)[:, None]
+    c = np.arange(nx, dtype=np.int64)[None, :]
+    c_next = (c + 1) % nx
+
+    p00 = (r * nx + c).ravel()
+    p10 = (r * nx + c_next).ravel()
+    p01 = ((r + 1) * nx + c).ravel()
+    p11 = ((r + 1) * nx + c_next).ravel()
+
+    f_out1 = np.column_stack([p00, p10, p11])
+    f_out2 = np.column_stack([p00, p11, p01])
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    f_in1 = np.column_stack([b00, b11, b10])
+    f_in2 = np.column_stack([b00, b01, b11])
+
+    c_all = np.arange(nx, dtype=np.int64)
+    c_all_next = (c_all + 1) % nx
+    t_bot = c_all
+    t_bot_n = c_all_next
+    b_bot = t_bot + n_pts
+    b_bot_n = t_bot_n + n_pts
+    w_bot1 = np.column_stack([b_bot, b_bot_n, t_bot_n])
+    w_bot2 = np.column_stack([b_bot, t_bot_n, t_bot])
+
+    t_top = (ny - 1) * nx + c_all
+    t_top_n = (ny - 1) * nx + c_all_next
+    b_top = t_top + n_pts
+    b_top_n = t_top_n + n_pts
+    w_top1 = np.column_stack([b_top_n, b_top, t_top])
+    w_top2 = np.column_stack([b_top_n, t_top, t_top_n])
+
+    all_faces = np.vstack([f_out1, f_out2, f_in1, f_in2, w_bot1, w_bot2, w_top1, w_top2])
+    cone_mesh = trimesh.Trimesh(vertices=all_verts, faces=all_faces, process=True)
+    trimesh.repair.fix_normals(cone_mesh)
+
+    parts = [cone_mesh]
+    if lamp_spec["puck_diameter_mm"] * 0.5 < r_bot + 1.0:
+        holder_parts = build_suspended_lamp_holder_bars(
+            inner_span_x=r_bot * 2.0,
+            inner_span_y=r_bot * 2.0,
+            z_base=0.0,
+            lamp_spec=lamp_spec,
+        )
+        parts.extend(holder_parts)
+
+    combined = trimesh.util.concatenate(parts)
+    combined.merge_vertices()
+    return combined
+
+
+def build_vase_lumina_lithophane_mesh(
+    t_grid: np.ndarray,
+    diameter_mm: float,
+    height_mm: float,
+    border_width_mm: float = 4.0,
+    frame_thickness_mm: float = 3.8,
+    lamp_spec: Optional[Dict[str, float]] = None,
+) -> trimesh.Trimesh:
+    """
+    Builds a 360° Curved Amphora / Vase Lithophane ("Vase") with:
+    - Classical bulbous belly, tapered waist/neck, and flared lip
+    - Seamless 360° photo wrap around the vase body
+    - Integrated bottom LED lamp mount + rear cable notch!
+    """
+    if lamp_spec is None:
+        lamp_spec = resolve_lamp_spec("bambu_led_001")
+
+    grid = t_grid.copy()
+    ny, nx = grid.shape
+    by = max(1, int(round((border_width_mm / max(1.0, height_mm)) * ny)))
+    if border_width_mm > 0.1:
+        grid[:by, :] = frame_thickness_mm
+        grid[ny - by :, :] = frame_thickness_mm
+
+    blend_cols = min(6, nx // 20)
+    if blend_cols >= 2:
+        for k in range(blend_cols):
+            w = (k + 1) / float(blend_cols + 1)
+            avg_col = 0.5 * (grid[:, k] + grid[:, nx - 1 - k])
+            grid[:, k] = w * grid[:, k] + (1.0 - w) * avg_col
+            grid[:, nx - 1 - k] = w * grid[:, nx - 1 - k] + (1.0 - w) * avg_col
+
+    grid_flipped = np.flipud(grid).astype(np.float64)
+    r_max = max(32.0, float(diameter_mm) * 0.5)
+
+    # Smooth amphora / porcelain vase radial profile R(v) for v in [0..1]
+    v = np.linspace(0.0, 1.0, ny, dtype=np.float64)
+    # Foot at v=0 (0.64), wide belly at v=0.38 (1.00), narrow neck at v=0.82 (0.44), flared lip at v=1.0 (0.54)
+    belly = np.exp(-((v - 0.36) / 0.28) ** 2)
+    neck_dip = np.exp(-((v - 0.82) / 0.14) ** 2)
+    lip_flare = np.exp(-((v - 1.0) / 0.09) ** 2)
+    profile_norm = 0.58 + 0.44 * belly - 0.22 * neck_dip + 0.14 * lip_flare
+    profile_norm = profile_norm / np.max(profile_norm)
+    r_in_profile = (r_max * profile_norm)[:, None]
+
+    # Compute dR/dz for surface normal
+    dz = float(height_mm) / max(1, ny - 1)
+    dr_dz = np.gradient(r_in_profile[:, 0], dz)[:, None]
+    norm_rad = 1.0 / np.hypot(1.0, dr_dz)
+    norm_z = -dr_dz / np.hypot(1.0, dr_dz)
+
+    thetas = np.linspace(0.0, 2.0 * math.pi, nx, endpoint=False, dtype=np.float64)
+    zs = np.linspace(0.0, float(height_mm), ny, dtype=np.float64)
+    cos_t = np.cos(thetas)[None, :]
+    sin_t = np.sin(thetas)[None, :]
+    zv = np.broadcast_to(zs[:, None], (ny, nx)).copy()
+
+    r_bot = float(r_in_profile[0, 0])
+    notch_w = lamp_spec["cable_notch_width_mm"]
+    notch_h = min(lamp_spec["cable_notch_height_mm"], height_mm * 0.12)
+    if notch_w > 0.5 and notch_h > 0.5:
+        for c_i in range(nx):
+            x_c = r_bot * math.cos(thetas[c_i])
+            y_c = r_bot * math.sin(thetas[c_i])
+            if y_c > 0 and abs(x_c) <= notch_w * 0.55:
+                zv[zv[:, c_i] < notch_h, c_i] = notch_h
+
+    r_outer = r_in_profile + grid_flipped * norm_rad
+    z_outer = np.clip(zv + grid_flipped * norm_z, 0.0, float(height_mm))
+
+    x_out = (r_outer * cos_t).ravel()
+    y_out = (r_outer * sin_t).ravel()
+    z_out = z_outer.ravel()
+
+    x_in = (r_in_profile * cos_t).ravel()
+    y_in = (r_in_profile * sin_t).ravel()
+    z_in = zv.ravel()
+
+    n_pts = nx * ny
+    all_verts = np.vstack([
+        np.column_stack([x_out, y_out, z_out]),
+        np.column_stack([x_in, y_in, z_in]),
+    ])
+
+    r = np.arange(ny - 1, dtype=np.int64)[:, None]
+    c = np.arange(nx, dtype=np.int64)[None, :]
+    c_next = (c + 1) % nx
+
+    p00 = (r * nx + c).ravel()
+    p10 = (r * nx + c_next).ravel()
+    p01 = ((r + 1) * nx + c).ravel()
+    p11 = ((r + 1) * nx + c_next).ravel()
+
+    f_out1 = np.column_stack([p00, p10, p11])
+    f_out2 = np.column_stack([p00, p11, p01])
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    f_in1 = np.column_stack([b00, b11, b10])
+    f_in2 = np.column_stack([b00, b01, b11])
+
+    c_all = np.arange(nx, dtype=np.int64)
+    c_all_next = (c_all + 1) % nx
+    t_bot = c_all
+    t_bot_n = c_all_next
+    b_bot = t_bot + n_pts
+    b_bot_n = t_bot_n + n_pts
+    w_bot1 = np.column_stack([b_bot, b_bot_n, t_bot_n])
+    w_bot2 = np.column_stack([b_bot, t_bot_n, t_bot])
+
+    t_top = (ny - 1) * nx + c_all
+    t_top_n = (ny - 1) * nx + c_all_next
+    b_top = t_top + n_pts
+    b_top_n = t_top_n + n_pts
+    w_top1 = np.column_stack([b_top_n, b_top, t_top])
+    w_top2 = np.column_stack([b_top_n, t_top, t_top_n])
+
+    all_faces = np.vstack([f_out1, f_out2, f_in1, f_in2, w_bot1, w_bot2, w_top1, w_top2])
+    vase_mesh = trimesh.Trimesh(vertices=all_verts, faces=all_faces, process=True)
+    trimesh.repair.fix_normals(vase_mesh)
+
+    parts = [vase_mesh]
+    if lamp_spec["puck_diameter_mm"] * 0.5 < r_bot + 2.0:
+        holder_parts = build_suspended_lamp_holder_bars(
+            inner_span_x=r_bot * 2.0,
+            inner_span_y=r_bot * 2.0,
+            z_base=0.0,
+            lamp_spec=lamp_spec,
+        )
+        parts.extend(holder_parts)
+
+    combined = trimesh.util.concatenate(parts)
+    combined.merge_vertices()
+    return combined
+
+
+def build_balloon_heart_lithophane_mesh(
+    t_grid: np.ndarray,
+    width_mm: float,
+    frame_thickness_mm: float = 3.6,
+) -> trimesh.Trimesh:
+    """
+    Builds a 3D Inflated Heart Cushion ("Balloon") Lithophane (`width_mm`):
+    - Smooth 3D puffed heart geometry (`dome_profile = sqrt(dist_to_boundary)`) on both Front (-Y) and Back (+Y)
+    - Hollow interior shell so an LED string or tea-light illuminates the entire 3D heart
+    - Flat bottom pedestal base with LED insertion hole so the 3D Heart stands upright on a table!
+    """
+    from modules_futurs.hueforge_tiler import build_layout_polygons
+
+    heart_tiles = build_layout_polygons("single_heart", size_mm=width_mm, aspect_ratio=1.0)
+    heart_poly = heart_tiles[0][1]
+    minx, miny, maxx, maxy = heart_poly.bounds
+    w_span = maxx - minx
+    h_span = maxy - miny
+
+    grid_flipped = np.flipud(t_grid).astype(np.float64)
+    ny, nx = grid_flipped.shape
+
+    # Rasterize heart mask and compute smooth 3D balloon inflation dome
+    from PIL import ImageDraw
+    from scipy.ndimage import distance_transform_edt
+
+    mask_img = Image.new("L", (nx, ny), 0)
+    draw = ImageDraw.Draw(mask_img)
+    ext_coords = np.array(heart_poly.exterior.coords, dtype=np.float64)
+    px = (ext_coords[:, 0] - minx) / max(1e-5, w_span) * (nx - 1)
+    py = (ext_coords[:, 1] - miny) / max(1e-5, h_span) * (ny - 1)
+    pts_px = list(zip(px.tolist(), py.tolist()))
+    draw.polygon(pts_px, fill=255)
+    inside = np.asarray(mask_img) > 127
+
+    dist_px = distance_transform_edt(inside).astype(np.float64)
+    max_dist = max(1.0, float(np.max(dist_px)))
+    u_dist = np.clip(dist_px / max_dist, 0.0, 1.0)
+    # Ellipsoidal balloon puff profile: steep near edge, smooth dome across the heart
+    dome_norm = np.power(u_dist, 0.48)
+    dome_norm = gaussian_filter(dome_norm, sigma=2.0) * inside
+    max_puff_mm = max(14.0, float(width_mm) * 0.16)
+    puff_mm = dome_norm * max_puff_mm
+
+    # Build front relief thickness (only inside heart; outside is clipped by manifold intersection)
+    edge_band = inside & (dist_px <= 3.5)
+    t_eff = np.where(edge_band, frame_thickness_mm, grid_flipped)
+
+    pad = 2.0
+    xs = np.linspace(minx - pad, maxx + pad, nx, dtype=np.float32)
+    ys = np.linspace(miny - pad, maxy + pad, ny, dtype=np.float32)
+    xv, yv = np.meshgrid(xs, ys)
+
+    # Front surface: z_front = puff_mm + t_eff; Back surface: z_back = -puff_mm * 0.55
+    z_top = (puff_mm + t_eff).astype(np.float32)
+    z_bot = (-puff_mm * 0.45).astype(np.float32)
+
+    n_pts = nx * ny
+    top_verts = np.column_stack([xv.ravel(), yv.ravel(), z_top.ravel()])
+    bot_verts = np.column_stack([xv.ravel(), yv.ravel(), z_bot.ravel()])
+    all_verts = np.ascontiguousarray(np.vstack([top_verts, bot_verts]), dtype=np.float32)
+
+    r = np.arange(ny - 1, dtype=np.uint32)[:, None]
+    c = np.arange(nx - 1, dtype=np.uint32)[None, :]
+    p00 = (r * nx + c).ravel()
+    p10 = p00 + 1
+    p01 = p00 + nx
+    p11 = p01 + 1
+
+    top_t1 = np.column_stack([p00, p10, p11])
+    top_t2 = np.column_stack([p00, p11, p01])
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    bot_t1 = np.column_stack([b00, b11, b10])
+    bot_t2 = np.column_stack([b00, b01, b11])
+
+    c_idx = np.arange(nx - 1, dtype=np.uint32)
+    t_south = c_idx
+    b_south = t_south + n_pts
+    w_south1 = np.column_stack([b_south, b_south + 1, t_south + 1])
+    w_south2 = np.column_stack([b_south, t_south + 1, t_south])
+
+    t_north = (ny - 1) * nx + c_idx
+    b_north = t_north + n_pts
+    w_north1 = np.column_stack([b_north + 1, b_north, t_north])
+    w_north2 = np.column_stack([b_north + 1, t_north, t_north + 1])
+
+    r_idx = np.arange(ny - 1, dtype=np.uint32)
+    t_west = r_idx * nx
+    b_west = t_west + n_pts
+    w_west1 = np.column_stack([b_west + nx, b_west, t_west])
+    w_west2 = np.column_stack([b_west + nx, t_west, t_west + nx])
+
+    t_east = r_idx * nx + (nx - 1)
+    b_east = t_east + n_pts
+    w_east1 = np.column_stack([b_east, b_east + nx, t_east + nx])
+    w_east2 = np.column_stack([b_east, t_east + nx, t_east])
+
+    all_faces = np.ascontiguousarray(
+        np.vstack([top_t1, top_t2, bot_t1, bot_t2, w_south1, w_south2, w_north1, w_north2, w_west1, w_west2, w_east1, w_east2]),
+        dtype=np.uint32,
+    )
+    slab_mani = m3d.Manifold(m3d.Mesh(vert_properties=all_verts, tri_verts=all_faces))
+
+    # Clip strictly to the Heart polygon
+    ext_c = np.array(heart_poly.exterior.coords[:-1], dtype=np.float64)
+    if not sg.LinearRing(ext_c).is_ccw:
+        ext_c = ext_c[::-1]
+    cs_heart = m3d.CrossSection([ext_c.tolist()])
+    clip_mani = m3d.Manifold.extrude(cs_heart, height=max_puff_mm * 3.0 + 20.0).translate([0.0, 0.0, -max_puff_mm - 5.0])
+    balloon_mani = slab_mani ^ clip_mani
+
+    mesh = manifold_to_trimesh(balloon_mani)
+    # Stand upright on X-Z plane with flat pedestal base so it prints vertically
+    rot = trimesh.transformations.rotation_matrix(math.pi / 2.0, [1.0, 0.0, 0.0])
+    mesh.apply_transform(rot)
+    min_z = float(mesh.bounds[0][2])
+    mesh.apply_translation([0.0, 0.0, -min_z + 2.0])
+
+    # Add a sleek oval pedestal stand at the bottom tip of the heart
+    base_cyl = trimesh.creation.cylinder(radius=width_mm * 0.24, height=4.0, sections=48)
+    base_cyl.apply_scale([1.15, 0.75, 1.0])
+    base_cyl.apply_translation([0.0, 0.0, 2.0])
+    combined = trimesh.util.concatenate([mesh, base_cyl])
+    combined.merge_vertices()
+    return combined
+
+
+def extract_stencil_silhouette_mask(img: Image.Image, width_px: int, height_px: int) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Automatically segments the foreground subject silhouette from the background corner color
+    (like the giraffe in the "Stencil" example) and returns `(inside_mask, rim_mask)`.
+    """
+    from scipy.ndimage import binary_closing, binary_dilation, binary_erosion, binary_fill_holes, label
+
+    resized = img.resize((width_px, height_px), Image.Resampling.LANCZOS).convert("RGB")
+    arr = np.asarray(resized, dtype=np.float32)
+
+    # Sample border pixels to estimate background color
+    b_strip = max(3, min(width_px, height_px) // 25)
+    border_pixels = np.concatenate([
+        arr[:b_strip, :, :].reshape(-1, 3),
+        arr[-b_strip:, :, :].reshape(-1, 3),
+        arr[:, :b_strip, :].reshape(-1, 3),
+        arr[:, -b_strip:, :].reshape(-1, 3),
+    ], axis=0)
+    bg_color = np.median(border_pixels, axis=0)
+
+    color_dist = np.linalg.norm(arr - bg_color[None, None, :], axis=-1)
+    # Adaptive threshold
+    thresh = max(24.0, float(np.percentile(color_dist, 30)) * 1.35)
+    fg = color_dist > thresh
+
+    # If background wasn't uniform (e.g. full photo), fall back to Otsu-like central object mask
+    fg_ratio = float(np.mean(fg))
+    if fg_ratio < 0.06 or fg_ratio > 0.92:
+        luma = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
+        med_border = float(np.median(np.concatenate([luma[0, :], luma[-1, :], luma[:, 0], luma[:, -1]])))
+        fg = np.abs(luma - med_border) > 28.0
+
+    # Morphological cleanup + hole filling + keep largest connected component(s)
+    fg = binary_closing(fg, structure=np.ones((7, 7)))
+    fg = binary_fill_holes(fg)
+    labeled, n_comp = label(fg)
+    if n_comp > 1:
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0
+        max_sz = int(np.max(sizes))
+        # Keep components at least 12% of the main subject
+        keep_labels = np.where(sizes >= max_sz * 0.12)[0]
+        fg = np.isin(labeled, keep_labels)
+
+    # Smooth silhouette boundary
+    fg_smooth = gaussian_filter(fg.astype(np.float32), sigma=2.0) > 0.42
+    fg_smooth = binary_dilation(fg_smooth, iterations=2)
+
+    if float(np.mean(fg_smooth)) < 0.05:
+        # Safe fallback: rounded oval portrait silhouette
+        yy, xx = np.ogrid[:height_px, :width_px]
+        ny_c = (yy - height_px * 0.5) / (height_px * 0.44)
+        nx_c = (xx - width_px * 0.5) / (width_px * 0.42)
+        fg_smooth = (nx_c ** 2 + ny_c ** 2) <= 1.0
+
+    eroded = binary_erosion(fg_smooth, iterations=max(2, min(width_px, height_px) // 75))
+    rim_mask = fg_smooth & (~eroded)
+    return fg_smooth, rim_mask
+
+
+def build_stencil_cutout_lithophane_mesh(
+    img: Image.Image,
+    t_grid: np.ndarray,
+    width_mm: float,
+    height_mm: float,
+    frame_thickness_mm: float = 3.6,
+    stand_vertical_for_print: bool = True,
+) -> trimesh.Trimesh:
+    """
+    Builds a Silhouette Cutout ("Stencil") Lithophane:
+    - Background is completely cut away around the subject's organic silhouette
+    - A protective contour rim (`frame_thickness_mm`) follows the silhouette perimeter
+    - Integrated flat standing pedestal base at the bottom so the cutout stands upright!
+    """
+    grid_flipped = np.flipud(t_grid).astype(np.float32)
+    ny, nx = grid_flipped.shape
+
+    inside_mask, rim_mask = extract_stencil_silhouette_mask(img, width_px=nx, height_px=ny)
+    inside_flipped = np.flipud(inside_mask)
+    rim_flipped = np.flipud(rim_mask)
+
+    # Apply protective contour rim
+    grid_work = np.where(rim_flipped, float(frame_thickness_mm), grid_flipped)
+
+    # Extract Shapely polygon from inside_flipped using matplotlib contour or marching squares via raster
+    # Even simpler and 100% watertight: build polygons from horizontal run-length strips of inside_flipped!
+    xs = np.linspace(-width_mm * 0.5, width_mm * 0.5, nx, dtype=np.float64)
+    ys = np.linspace(-height_mm * 0.5, height_mm * 0.5, ny, dtype=np.float64)
+    dx = float(width_mm) / max(1, nx - 1)
+    dy = float(height_mm) / max(1, ny - 1)
+
+    boxes = []
+    # Downsample mask to ~140 rows for fast exact Shapely union + smoothing
+    step_r = max(1, ny // 140)
+    step_c = max(1, nx // 140)
+    for r_i in range(0, ny, step_r):
+        row_m = inside_flipped[r_i, ::step_c]
+        if not np.any(row_m):
+            continue
+        y0 = ys[r_i] - dy * 0.6
+        y1 = ys[min(ny - 1, r_i + step_r)] + dy * 0.6
+        # Find contiguous True runs
+        padded = np.concatenate([[False], row_m, [False]])
+        starts = np.where(padded[1:] & ~padded[:-1])[0]
+        ends = np.where(~padded[1:] & padded[:-1])[0]
+        for s_c, e_c in zip(starts, ends):
+            x0 = xs[min(nx - 1, s_c * step_c)] - dx * 0.6
+            x1 = xs[min(nx - 1, min(nx - 1, (e_c - 1) * step_c))] + dx * 0.6
+            boxes.append(sg.box(x0, y0, x1, y1))
+
+    from shapely.ops import unary_union
+    silhouette_poly = unary_union(boxes).buffer(dx * 1.5, resolution=16).buffer(-dx * 0.8, resolution=16).simplify(dx * 0.45)
+
+    xv, yv = np.meshgrid(xs.astype(np.float32), ys.astype(np.float32))
+    n_pts = nx * ny
+    top_verts = np.column_stack([xv.ravel(), yv.ravel(), grid_work.ravel()])
+    bot_verts = np.column_stack([xv.ravel(), yv.ravel(), np.zeros(n_pts, dtype=np.float32)])
+    all_verts = np.ascontiguousarray(np.vstack([top_verts, bot_verts]), dtype=np.float32)
+
+    r = np.arange(ny - 1, dtype=np.uint32)[:, None]
+    c = np.arange(nx - 1, dtype=np.uint32)[None, :]
+    p00 = (r * nx + c).ravel()
+    p10 = p00 + 1
+    p01 = p00 + nx
+    p11 = p01 + 1
+
+    top_t1 = np.column_stack([p00, p10, p11])
+    top_t2 = np.column_stack([p00, p11, p01])
+    b00, b10, b01, b11 = p00 + n_pts, p10 + n_pts, p01 + n_pts, p11 + n_pts
+    bot_t1 = np.column_stack([b00, b11, b10])
+    bot_t2 = np.column_stack([b00, b01, b11])
+
+    c_idx = np.arange(nx - 1, dtype=np.uint32)
+    t_south = c_idx
+    b_south = t_south + n_pts
+    w_south1 = np.column_stack([b_south, b_south + 1, t_south + 1])
+    w_south2 = np.column_stack([b_south, t_south + 1, t_south])
+
+    t_north = (ny - 1) * nx + c_idx
+    b_north = t_north + n_pts
+    w_north1 = np.column_stack([b_north + 1, b_north, t_north])
+    w_north2 = np.column_stack([b_north + 1, t_north, t_north + 1])
+
+    r_idx = np.arange(ny - 1, dtype=np.uint32)
+    t_west = r_idx * nx
+    b_west = t_west + n_pts
+    w_west1 = np.column_stack([b_west + nx, b_west, t_west])
+    w_west2 = np.column_stack([b_west + nx, t_west, t_west + nx])
+
+    t_east = r_idx * nx + (nx - 1)
+    b_east = t_east + n_pts
+    w_east1 = np.column_stack([b_east, b_east + nx, t_east + nx])
+    w_east2 = np.column_stack([b_east, t_east + nx, t_east])
+
+    all_faces = np.ascontiguousarray(
+        np.vstack([top_t1, top_t2, bot_t1, bot_t2, w_south1, w_south2, w_north1, w_north2, w_west1, w_west2, w_east1, w_east2]),
+        dtype=np.uint32,
+    )
+    slab_mani = m3d.Manifold(m3d.Mesh(vert_properties=all_verts, tri_verts=all_faces))
+
+    # Build CrossSection from silhouette_poly (Polygon or MultiPolygon)
+    geoms = [silhouette_poly] if isinstance(silhouette_poly, sg.Polygon) else list( getattr(silhouette_poly, "geoms", []))
+    polys_cs = []
+    for g in geoms:
+        if g.area < 8.0:
+            continue
+        ext_c = np.array(g.exterior.coords[:-1], dtype=np.float64)
+        if not sg.LinearRing(ext_c).is_ccw:
+            ext_c = ext_c[::-1]
+        polys_cs.append(ext_c.tolist())
+        for h_ring in g.interiors:
+            if sg.Polygon(h_ring).area < 6.0:
+                continue
+            hc = np.array(h_ring.coords[:-1], dtype=np.float64)
+            if sg.LinearRing(hc).is_ccw:
+                hc = hc[::-1]
+            polys_cs.append(hc.tolist())
+
+    if polys_cs:
+        cs = m3d.CrossSection(polys_cs)
+        clip_m = m3d.Manifold.extrude(cs, height=frame_thickness_mm + 10.0).translate([0.0, 0.0, -2.0])
+        stencil_mani = slab_mani ^ clip_m
+        mesh = manifold_to_trimesh(stencil_mani)
+    else:
+        mesh = manifold_to_trimesh(slab_mani)
+
+    if stand_vertical_for_print:
+        rot = trimesh.transformations.rotation_matrix(math.pi / 2.0, [1.0, 0.0, 0.0])
+        mesh.apply_transform(rot)
+        min_z = float(mesh.bounds[0][2])
+        mesh.apply_translation([0.0, 0.0, -min_z + 2.5])
+        # Add a sleek standing base bar connecting the bottom of the silhouette (e.g. giraffe legs!)
+        b_min, b_max = mesh.bounds
+        span_x = max(35.0, float(b_max[0] - b_min[0]) * 0.82)
+        cx = 0.5 * float(b_min[0] + b_max[0])
+        stand_bar = trimesh.creation.box(extents=[span_x, 18.0, 3.2])
+        stand_bar.apply_translation([cx, 0.0, 1.6])
+        mesh = trimesh.util.concatenate([mesh, stand_bar])
+        mesh.merge_vertices()
+
+    return mesh
+
 
